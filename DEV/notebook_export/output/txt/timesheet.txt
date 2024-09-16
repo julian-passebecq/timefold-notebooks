@@ -1,0 +1,521 @@
+# School timetabling with Timefold in a Kotlin Notebook
+
+This Kotlin Jupyter Notebook solves a school timetabling problem with [Timefold](https://timefold.ai), the open source planning solver AI.
+It optimizes the school schedule for students and teachers.
+
+![School timetabling input output](https://timefold.ai/docs/timefold-solver/latest/_images/quickstart/school-timetabling/schoolTimetablingInputOutput.png)
+
+This Notebook automatically assigns each lesson to a timeslot and a room, while adhering to hard and soft constraints: 
+
+* A room can have at most one lesson at the same time.
+* A teacher can teach at most one lesson at the same time.
+* A student can attend at most one lesson at the same time.
+* A teacher prefers to teach all lessons in the same room.
+* A teacher prefers to teach sequential lessons and dislikes gaps between lessons.
+* A student dislikes sequential lessons on the same subject.
+
+## Dependencies
+
+Add the Timefold solver dependency:
+
+// Code
+
+@file:DependsOn("ai.timefold.solver:timefold-solver-core:1.11.0")
+
+// End Code
+
+## Domain
+
+Create the domain data classes:
+
+### Room
+
+The `Room` class represents a location where lessons are taught, for example, `Room A` or `Room B`. For simplicity’s sake, all rooms are without capacity limits and they can accommodate all lessons.
+
+// Code
+
+data class Room(
+    val name: String
+)
+
+// End Code
+
+### Timeslot
+
+The `Timeslot` class represents a time interval when lessons are taught, for example, `Monday 10:30 - 11:30` or `Tuesday 13:30 - 14:30`. For simplicity’s sake, all time slots have the same duration and there are no time slots during lunch or other breaks.
+
+// Code
+
+import java.time.DayOfWeek
+import java.time.LocalTime
+
+data class Timeslot(
+    val dayOfWeek: DayOfWeek,
+    val startTime: LocalTime,
+    val endTime: LocalTime
+)
+
+// End Code
+
+### Lesson
+
+During a lesson, represented by the `Lesson` class, a teacher teaches a subject to a group of students, for example, `Math` by `A.Turing` for `9th grade` or `Chemistry` by `M.Curie` for `10th grade`. If a subject is taught multiple times per week by the same teacher to the same student group, there are multiple `Lesson` instances that are only distinguishable by `id`. For example, the 9th grade has six math lessons a week.
+
+During solving, Timefold Solver changes the `timeslot` and `room` fields of the `Lesson` class, to assign each lesson to a time slot and a room. Therefore, those fields are annnoted with `@PlanningVariable` and the class with `@PlanningEntity`:
+
+// Code
+
+import ai.timefold.solver.core.api.domain.entity.PlanningEntity
+import ai.timefold.solver.core.api.domain.lookup.PlanningId
+import ai.timefold.solver.core.api.domain.variable.PlanningVariable
+
+@PlanningEntity
+data class Lesson(
+
+    @PlanningId
+    val id: Long,
+    val subject: String,
+    val teacher: String,
+    val studentGroup: String) {
+
+    @PlanningVariable
+    var timeslot: Timeslot? = null
+    @PlanningVariable
+    var room: Room? = null
+
+    // No-arg constructor required for Timefold
+    constructor() : this(0, "", "", "")
+
+    override fun toString(): String = "$subject"
+
+}
+
+// End Code
+
+## Constraints
+
+The solver takes into account hard and soft constraints:
+
+// Code
+
+import ai.timefold.solver.core.api.score.buildin.hardsoft.HardSoftScore
+import ai.timefold.solver.core.api.score.stream.Constraint
+import ai.timefold.solver.core.api.score.stream.ConstraintFactory
+import ai.timefold.solver.core.api.score.stream.ConstraintProvider
+import ai.timefold.solver.core.api.score.stream.Joiners
+import java.time.Duration
+
+class TimeTableConstraintProvider : ConstraintProvider {
+
+    override fun defineConstraints(constraintFactory: ConstraintFactory): Array<Constraint>? {
+        return arrayOf(
+            // Hard constraints
+            roomConflict(constraintFactory),
+            teacherConflict(constraintFactory),
+            studentGroupConflict(constraintFactory),
+            // Soft constraints
+            teacherRoomStability(constraintFactory),
+            teacherTimeEfficiency(constraintFactory),
+            studentGroupSubjectVariety(constraintFactory)
+        )
+    }
+
+    fun roomConflict(constraintFactory: ConstraintFactory): Constraint {
+        // A room can accommodate at most one lesson at the same time.
+        return constraintFactory
+            // Select each pair of 2 different lessons ...
+            .forEachUniquePair(
+                Lesson::class.java,
+                // ... in the same timeslot ...
+                Joiners.equal(Lesson::timeslot),
+                // ... in the same room ...
+                Joiners.equal(Lesson::room)
+            )
+            // ... and penalize each pair with a hard weight.
+            .penalize(HardSoftScore.ONE_HARD)
+            .asConstraint("school-timetabling", "Room conflict");
+    }
+
+    fun teacherConflict(constraintFactory: ConstraintFactory): Constraint {
+        // A teacher can teach at most one lesson at the same time.
+        return constraintFactory
+            .forEachUniquePair(
+                Lesson::class.java,
+                Joiners.equal(Lesson::timeslot),
+                Joiners.equal(Lesson::teacher)
+            )
+            .penalize(HardSoftScore.ONE_HARD)
+            .asConstraint("school-timetabling", "Teacher conflict");
+    }
+
+    fun studentGroupConflict(constraintFactory: ConstraintFactory): Constraint {
+        // A student can attend at most one lesson at the same time.
+        return constraintFactory
+            .forEachUniquePair(
+                Lesson::class.java,
+                Joiners.equal(Lesson::timeslot),
+                Joiners.equal(Lesson::studentGroup)
+            )
+            .penalize(HardSoftScore.ONE_HARD)
+            .asConstraint("school-timetabling", "Student group conflict");
+    }
+
+    fun teacherRoomStability(constraintFactory: ConstraintFactory): Constraint {
+        // A teacher prefers to teach in a single room.
+        return constraintFactory
+            .forEachUniquePair(
+                Lesson::class.java,
+                Joiners.equal(Lesson::teacher)
+            )
+            .filter { lesson1: Lesson, lesson2: Lesson -> lesson1.room !== lesson2.room }
+            .penalize(HardSoftScore.ONE_SOFT)
+            .asConstraint("school-timetabling", "Teacher room stability");
+    }
+
+    fun teacherTimeEfficiency(constraintFactory: ConstraintFactory): Constraint {
+        // A teacher prefers to teach sequential lessons and dislikes gaps between lessons.
+        return constraintFactory
+            .forEach(Lesson::class.java)
+            .join(Lesson::class.java,
+                Joiners.equal(Lesson::teacher),
+                Joiners.equal { lesson: Lesson -> lesson.timeslot?.dayOfWeek })
+            .filter { lesson1: Lesson, lesson2: Lesson ->
+                val between = Duration.between(
+                    lesson1.timeslot?.endTime,
+                    lesson2.timeslot?.startTime
+                )
+                !between.isNegative && between.compareTo(Duration.ofMinutes(30)) <= 0
+            }
+            .reward(HardSoftScore.ONE_SOFT)
+            .asConstraint("school-timetabling", "Teacher time efficiency");
+    }
+
+    fun studentGroupSubjectVariety(constraintFactory: ConstraintFactory): Constraint {
+        // A student group dislikes sequential lessons on the same subject.
+        return constraintFactory
+            .forEach(Lesson::class.java)
+            .join(Lesson::class.java,
+                Joiners.equal(Lesson::subject),
+                Joiners.equal(Lesson::studentGroup),
+                Joiners.equal { lesson: Lesson -> lesson.timeslot?.dayOfWeek })
+            .filter { lesson1: Lesson, lesson2: Lesson ->
+                val between = Duration.between(
+                    lesson1.timeslot?.endTime,
+                        lesson2.timeslot?.startTime
+                )
+                !between.isNegative && between.compareTo(Duration.ofMinutes(30)) <= 0
+            }
+            .penalize(HardSoftScore.ONE_SOFT)
+            .asConstraint("school-timetabling", "Student group subject variety");
+    }
+
+}
+
+// End Code
+
+### TimeTable
+
+The `TimeTable` class represents a single dataset. It wraps all `Timeslot`, `Room`, and `Lesson` instances. Furthermore, because it contains all lessons, each with a specific planning variable state, it is a planning solution, and it has a `score` field:
+
+// Code
+
+import ai.timefold.solver.core.api.domain.solution.PlanningEntityCollectionProperty
+import ai.timefold.solver.core.api.domain.solution.PlanningScore
+import ai.timefold.solver.core.api.domain.solution.PlanningSolution
+import ai.timefold.solver.core.api.domain.solution.ProblemFactCollectionProperty
+import ai.timefold.solver.core.api.domain.valuerange.ValueRangeProvider
+import ai.timefold.solver.core.api.score.buildin.hardsoft.HardSoftScore
+
+@PlanningSolution
+data class TimeTable(
+
+    @ProblemFactCollectionProperty
+    @ValueRangeProvider
+    val timeslots: List<Timeslot>,
+    @ProblemFactCollectionProperty
+    @ValueRangeProvider
+    val rooms: List<Room>,
+    @PlanningEntityCollectionProperty
+    val lessons: List<Lesson>) {
+
+    @PlanningScore
+    var score: HardSoftScore? = null
+
+    // No-arg constructor required for Timefold
+    constructor() : this(emptyList(), emptyList(), emptyList())
+
+}
+
+// End Code
+
+## Data generator
+
+Generate some data for a small school timetable:
+
+// Code
+
+fun generateDemoData(): TimeTable {
+    val timeslots: MutableList<Timeslot> = mutableListOf(
+            Timeslot(DayOfWeek.MONDAY, LocalTime.of(8, 30), LocalTime.of(9, 30)),
+            Timeslot(DayOfWeek.MONDAY, LocalTime.of(9, 30), LocalTime.of(10, 30)),
+            Timeslot(DayOfWeek.MONDAY, LocalTime.of(10, 30), LocalTime.of(11, 30)),
+            Timeslot(DayOfWeek.MONDAY, LocalTime.of(13, 30), LocalTime.of(14, 30)),
+            Timeslot(DayOfWeek.MONDAY, LocalTime.of(14, 30), LocalTime.of(15, 30)),
+    
+            Timeslot(DayOfWeek.TUESDAY, LocalTime.of(8, 30), LocalTime.of(9, 30)),
+            Timeslot(DayOfWeek.TUESDAY, LocalTime.of(9, 30), LocalTime.of(10, 30)),
+            Timeslot(DayOfWeek.TUESDAY, LocalTime.of(10, 30), LocalTime.of(11, 30)),
+            Timeslot(DayOfWeek.TUESDAY, LocalTime.of(13, 30), LocalTime.of(14, 30)),
+            Timeslot(DayOfWeek.TUESDAY, LocalTime.of(14, 30), LocalTime.of(15, 30)))
+    
+    val rooms: MutableList<Room> = mutableListOf(
+            Room("Room A"),
+            Room("Room B"),
+            Room("Room C"))
+    
+    var nextId: Long = 0
+    val lessons: MutableList<Lesson> = mutableListOf(
+            Lesson(nextId++, "Math", "A. Turing", "9th grade"),
+            Lesson(nextId++, "Math", "A. Turing", "9th grade"),
+            Lesson(nextId++, "Physics", "M. Curie", "9th grade"),
+            Lesson(nextId++, "Chemistry", "M. Curie", "9th grade"),
+            Lesson(nextId++, "Biology", "C. Darwin", "9th grade"),
+            Lesson(nextId++, "History", "I. Jones", "9th grade"),
+            Lesson(nextId++, "English", "I. Jones", "9th grade"),
+            Lesson(nextId++, "English", "I. Jones", "9th grade"),
+            Lesson(nextId++, "Spanish", "P. Cruz", "9th grade"),
+            Lesson(nextId++, "Spanish", "P. Cruz", "9th grade"),
+            Lesson(nextId++, "Math", "A. Turing", "10th grade"),
+            Lesson(nextId++, "Math", "A. Turing", "10th grade"),
+            Lesson(nextId++, "Math", "A. Turing", "10th grade"),
+            Lesson(nextId++, "Physics", "M. Curie", "10th grade"),
+            Lesson(nextId++, "Chemistry", "M. Curie", "10th grade"),
+            Lesson(nextId++, "French", "M. Curie", "10th grade"),
+            Lesson(nextId++, "Geography", "C. Darwin", "10th grade"),
+            Lesson(nextId++, "History", "I. Jones", "10th grade"),
+            Lesson(nextId++, "English", "P. Cruz", "10th grade"),
+            Lesson(nextId++, "Spanish", "P. Cruz", "10th grade"))
+    return TimeTable(timeslots, rooms, lessons)
+}
+
+// End Code
+
+## Solve it
+
+Configure and run the solver:
+
+// Code
+
+import ai.timefold.solver.core.config.solver.SolverConfig
+import ai.timefold.solver.core.api.solver.SolverFactory
+import ai.timefold.solver.core.api.solver.Solver
+
+val solverFactory: SolverFactory<TimeTable> = SolverFactory.create(SolverConfig()
+        .withSolutionClass(TimeTable::class.java)
+        .withEntityClasses(Lesson::class.java)
+        .withConstraintProviderClass(TimeTableConstraintProvider::class.java)
+        // The solver runs only for 5 seconds on this small dataset.
+        // It's recommended to run for at least 5 minutes ("5m") otherwise.
+        .withTerminationSpentLimit(Duration.ofSeconds(5)))
+
+val problem: TimeTable = generateDemoData()
+
+println("Solving the problem ...")
+val solver: Solver<TimeTable> = solverFactory.buildSolver()
+val solution: TimeTable = solver.solve(problem)
+println("Solving finished with score (${solution.score}).")
+
+// End Code
+
+## Visualize the schedule
+
+Show the timetable:
+
+// Code
+
+val lessonByRoomMap = solution.lessons.groupBy { lesson -> Pair(lesson.timeslot, lesson.room) }
+val lessonByTeacherMap = solution.lessons.groupBy { lesson -> Pair(lesson.timeslot, lesson.teacher) }
+val lessonByStudentGroupMap = solution.lessons.groupBy { lesson -> Pair(lesson.timeslot, lesson.studentGroup) }
+HTML(buildString {
+    append("<p style='font-size: x-large'>Score: ${solution.score}</p>")
+    append("<p><b>By room</b></p>")
+    append("<table><tr><th/>")
+    for (room in solution.rooms) {
+        append("<th>${room.name}</th>")
+    }
+    append("</tr>")
+    for (timeslot in solution.timeslots) {
+        append("<tr><th>${timeslot.dayOfWeek} ${timeslot.startTime} - ${timeslot.endTime}</th>")
+        for (room in solution.rooms) {
+            val cellLessons = lessonByRoomMap.get(Pair(timeslot, room)) ?: emptyList()
+            append("<td>")
+            append(cellLessons.map { it.subject }.joinToString(", "))
+            append("</td>")
+        }
+        append("</tr>")
+    }
+    append("</table>")
+    append("<p><b>By teacher</b></p>")
+    append("<table><tr><th/>")
+    val teachers = solution.lessons.map { it.teacher }.distinct()
+    for (teacher in teachers) {
+        append("<th>${teacher}</th>")
+    }
+    append("</tr>")
+    for (timeslot in solution.timeslots) {
+        append("<tr><th>${timeslot.dayOfWeek} ${timeslot.startTime} - ${timeslot.endTime}</th>")
+        for (teacher in teachers) {
+            val cellLessons = lessonByTeacherMap.get(Pair(timeslot, teacher)) ?: emptyList()
+            append("<td>")
+            append(cellLessons.map { it.subject }.joinToString(", "))
+            append("</td>")
+        }
+        append("</tr>")
+    }
+    append("</table>")
+    append("<p><b>By student group</b></p>")
+    append("<table><tr><th/>")
+    val studentGroups = solution.lessons.map { it.studentGroup }.distinct()
+    for (studentGroup in studentGroups) {
+        append("<th>${studentGroup}</th>")
+    }
+    append("</tr>")
+    for (timeslot in solution.timeslots) {
+        append("<tr><th>${timeslot.dayOfWeek} ${timeslot.startTime} - ${timeslot.endTime}</th>")
+        for (studentGroup in studentGroups) {
+            val cellLessons = lessonByStudentGroupMap.get(Pair(timeslot, studentGroup)) ?: emptyList()
+            append("<td>")
+            append(cellLessons.map { it.subject }.joinToString(", "))
+            append("</td>")
+        }
+        append("</tr>")
+    }
+    append("</table>")
+
+    val unassignedLessons = lessonByRoomMap.get(Pair(null, null))
+    if (unassignedLessons != null && unassignedLessons.isNotEmpty()) {
+        append("<p>Unassigned lessons</p>")
+        append("<ul>")
+        for (lesson in unassignedLessons) {
+            append("<li>${lesson.subject} - ${lesson.teacher} - ${lesson.studentGroup}</li>")
+        }
+        append("</ul>")
+    }
+})
+
+// End Code
+
+## Statistics
+
+For a big dataset, a schedule visualization is often too verbose.
+Let's visualize the solution through statistics:
+
+// Code
+
+%use kandy
+
+// End Code
+
+### Lessons per teacher per weekday
+
+// Code
+
+val teacherToLessonsMap = solution.lessons.groupBy {it.teacher}
+val teachers = teacherToLessonsMap.keys.distinct()
+val dayOfWeeks = enumValues<DayOfWeek>().toList()
+val lessonCounts = dayOfWeeks.flatMap { dayOfWeek ->
+    teachers.map { teacher ->
+        (teacherToLessonsMap[teacher] ?: emptyList())
+            .count { it.timeslot?.dayOfWeek == dayOfWeek }
+    }
+}
+
+val dataset = mapOf(
+    "Teacher" to List(dayOfWeeks.size) { teachers }.flatten(),
+    "Lessons" to lessonCounts,
+    "Weekday" to dayOfWeeks.flatMap { dayOfWeek -> List(teachers.size) { dayOfWeek } }
+)
+
+dataset.plot {
+    layout.title = "Lessons per teacher per weekday"
+    groupBy("Weekday") {
+        barsH {
+            y("Teacher")
+            x("Lessons")
+            fillColor("Weekday") {
+                scale = categoricalColorHue()
+            }
+            position = Position.stack()
+        }
+    }
+}
+
+// End Code
+
+### Lessons per teacher per hour
+
+// Code
+
+val teacherToLessonsMap = solution.lessons.groupBy {it.teacher}
+val teachers = teacherToLessonsMap.keys.distinct()
+val startTimes = solution.timeslots.map { it.startTime.toString() }.distinct()
+val lessonCounts = startTimes.flatMap { startTime ->
+    teachers.map { teacher ->
+        (teacherToLessonsMap[teacher] ?: emptyList())
+            .count { it.timeslot?.startTime.toString() == startTime }
+    }
+}
+
+val dataset = mapOf(
+    "Teacher" to List(startTimes.size) { teachers }.flatten(),
+    "Lessons" to lessonCounts,
+    "Start time" to startTimes.flatMap { startTime -> List(teachers.size) { startTime } }
+)
+
+dataset.plot {
+    layout.title = "Lessons per teacher per hour"
+    groupBy("Start time") {
+        barsH {
+            y("Teacher")
+            x("Lessons")
+            fillColor("Start time") {
+                scale = categoricalColorHue()
+            }
+            position = Position.stack()
+        }
+    }
+}
+
+// End Code
+
+## Analyze the score
+
+Let's break down the score per constraint:
+
+// Code
+
+import ai.timefold.solver.core.api.solver.SolutionManager
+
+val solutionManager = SolutionManager.create(solverFactory)
+val scoreAnalysis = solutionManager.analyze(solution)
+
+// End Code
+
+And visualize it:
+
+// Code
+
+HTML(buildString {
+    append("<p style='font-size: x-large'>Score: ${scoreAnalysis.score}</p>")
+    append("<ul>")
+    for (constraint in scoreAnalysis.constraintMap().values) {
+        append("<li>${constraint.constraintRef().constraintName}: ${constraint.score.toShortString()}</li>")
+    }
+    append("</ul>")
+})
+
+// End Code
+
+## Conclusion
+
+To learn more about planning optimization, visit [timefold.ai](https://timefold.ai).

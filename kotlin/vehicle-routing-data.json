@@ -1,64 +1,382 @@
 {
-  "name": "belgium-n50-k10",
+  "name": "geneva-demo",
   "vehicles": [
-    {"name": "Vehicle A", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle B", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle C", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle D", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle E", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle F", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle G", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle H", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle I", "homeLocation": [50.8427501, 4.3515499], "capacity": 100},
-    {"name": "Vehicle J", "homeLocation": [50.8427501, 4.3515499], "capacity": 100}],
+    {
+      "name": "Vehicle A",
+      "homeLocation": [
+        46.2044,
+        6.1432
+      ],
+      "capacity": 100,
+      "departureTime": "2023-10-10T08:00:00"
+    },
+    {
+      "name": "Vehicle B",
+      "homeLocation": [
+        46.2044,
+        6.1432
+      ],
+      "capacity": 100,
+      "departureTime": "2023-10-10T08:00:00"
+    },
+    {
+      "name": "Vehicle C",
+      "homeLocation": [
+        46.2044,
+        6.1432
+      ],
+      "capacity": 100,
+      "departureTime": "2023-10-10T08:00:00"
+    },
+    {
+      "name": "Vehicle D",
+      "homeLocation": [
+        46.2044,
+        6.1432
+      ],
+      "capacity": 100,
+      "departureTime": "2023-10-10T08:00:00"
+    },
+    {
+      "name": "Vehicle E",
+      "homeLocation": [
+        46.2044,
+        6.1432
+      ],
+      "capacity": 100,
+      "departureTime": "2023-10-10T08:00:00"
+    }
+  ],
   "visits": [
-    {"name": "ANTHISNES", "location": [50.4812987, 5.5198048], "load": 15},
-    {"name": "AVE-ET-AUFFE", "location": [50.1085676, 5.1429583], "load": 16},
-    {"name": "BAVIKHOVE", "location": [50.8753581, 3.3113744], "load": 31},
-    {"name": "BERSILLIES-L'ABBAYE", "location": [50.2624949, 4.1523037], "load": 14},
-    {"name": "BLERET", "location": [50.688785, 5.2859129], "load": 33},
-    {"name": "BOURLERS", "location": [50.025208, 4.3409814], "load": 7},
-    {"name": "BULSKAMP", "location": [51.0432467, 2.6501345], "load": 9},
-    {"name": "CHIEVRES", "location": [50.5661351, 3.7853169], "load": 17},
-    {"name": "DAMME", "location": [51.2365829, 3.3400765], "load": 33},
-    {"name": "DONSTIENNES", "location": [50.2849958, 4.3106966], "load": 26},
-    {"name": "ELVERDINGE", "location": [50.8848669, 2.8162074], "load": 18},
-    {"name": "EVELETTE", "location": [50.411922, 5.173705], "load": 10},
-    {"name": "FONTAINE-L'EVEQUE", "location": [50.4100558, 4.3249526], "load": 32},
-    {"name": "GELINDEN", "location": [50.7670559, 5.2628934], "load": 26},
-    {"name": "GONDREGNIES", "location": [50.6271045, 3.9115699], "load": 14},
-    {"name": "GUIGNIES", "location": [50.5499808, 3.3727285], "load": 32},
-    {"name": "HAREN_BRUSSEL", "location": [50.8919578, 4.4182942], "load": 33},
-    {"name": "HEPPIGNIES", "location": [50.4814121, 4.4932598], "load": 30},
-    {"name": "HOFSTADE_BT.", "location": [50.9912912, 4.492735], "load": 25},
-    {"name": "HUMBEEK", "location": [50.9667658, 4.3834362], "load": 18},
-    {"name": "JURBISE", "location": [50.5208191, 3.9017078], "load": 26},
-    {"name": "KOMEN", "location": [50.77614, 3.007366], "load": 2},
-    {"name": "LANDEGEM", "location": [51.0566021, 3.573045], "load": 25},
-    {"name": "LES_BONS_VILLERS", "location": [50.5427462, 4.4476802], "load": 10},
-    {"name": "LISSEWEGE", "location": [51.2948381, 3.1994146], "load": 3},
-    {"name": "MAFFLE", "location": [50.6200815, 3.8018102], "load": 28},
-    {"name": "MAULDE", "location": [50.6165736, 3.5470846], "load": 9},
-    {"name": "MERKSPLAS", "location": [51.361787, 4.861625], "load": 21},
-    {"name": "MONT_NAM.", "location": [50.3534706, 4.9014191], "load": 7},
-    {"name": "NAAST", "location": [50.5504316, 4.0964803], "load": 24},
-    {"name": "NIEUWKERKEN-WAAS", "location": [51.1936164, 4.1787815], "load": 1},
-    {"name": "OLLIGNIES", "location": [50.6876172, 3.8574228], "load": 5},
-    {"name": "ORET", "location": [50.2998711, 4.6155651], "load": 19},
-    {"name": "PEPINGEN", "location": [50.7360287, 4.1360863], "load": 4},
-    {"name": "POUPEHAN", "location": [49.8122243, 5.0029], "load": 9},
-    {"name": "RENINGE", "location": [50.9477884, 2.7891722], "load": 7},
-    {"name": "ROSMEER", "location": [50.8460854, 5.5750235], "load": 16},
-    {"name": "SAINT-MARTIN", "location": [50.5009515, 4.6473657], "load": 27},
-    {"name": "SELANGE", "location": [49.6096472, 5.8560275], "load": 15},
-    {"name": "SINT-KWINTENS-LENNIK", "location": [50.8068661, 4.1538281], "load": 17},
-    {"name": "SOMZEE", "location": [50.2950667, 4.4831638], "load": 20},
-    {"name": "TAILLES", "location": [50.2273877, 5.7437507], "load": 27},
-    {"name": "TILFF", "location": [50.5695196, 5.5844061], "load": 33},
-    {"name": "VAUX-LEZ-ROSIERES", "location": [49.9102794, 5.5659053], "load": 18},
-    {"name": "VILLERS-L'EVEQUE", "location": [50.7044254, 5.4399729], "load": 31},
-    {"name": "VOSSEM", "location": [50.8346073, 4.557627], "load": 19},
-    {"name": "WARNANT-DREYE", "location": [50.5951652, 5.2276287], "load": 24},
-    {"name": "WETTEREN", "location": [51.0005742, 3.8693544], "load": 16},
-    {"name": "XHENDELESSE", "location": [50.6061517, 5.7830075], "load": 32}]
+    {
+      "name": "Visit 1",
+      "location": [
+        46.18575543693775,
+        6.196708624381043
+      ],
+      "load": 17,
+      "minStartTime": "2023-10-10T12:07:00",
+      "maxEndTime": "2023-10-10T14:04:00",
+      "serviceDuration": 1320
+    },
+    {
+      "name": "Visit 2",
+      "location": [
+        46.20520391607851,
+        6.12512611391579
+      ],
+      "load": 18,
+      "minStartTime": "2023-10-10T11:30:00",
+      "maxEndTime": "2023-10-10T12:30:00",
+      "serviceDuration": 2400
+    },
+    {
+      "name": "Visit 3",
+      "location": [
+        46.20917924906138,
+        6.124238314510238
+      ],
+      "load": 25,
+      "minStartTime": "2023-10-10T14:39:00",
+      "maxEndTime": "2023-10-10T16:30:00",
+      "serviceDuration": 3300
+    },
+    {
+      "name": "Visit 4",
+      "location": [
+        46.1700640667205,
+        6.14426953367982
+      ],
+      "load": 30,
+      "minStartTime": "2023-10-10T10:57:00",
+      "maxEndTime": "2023-10-10T12:52:00",
+      "serviceDuration": 1800
+    },
+    {
+      "name": "Visit 5",
+      "location": [
+        46.2106335283945,
+        6.123469227327239
+      ],
+      "load": 11,
+      "minStartTime": "2023-10-10T08:29:00",
+      "maxEndTime": "2023-10-10T09:40:00",
+      "serviceDuration": 3600
+    },
+    {
+      "name": "Visit 6",
+      "location": [
+        46.18960598233749,
+        6.10431325334571
+      ],
+      "load": 28,
+      "minStartTime": "2023-10-10T13:02:00",
+      "maxEndTime": "2023-10-10T13:46:00",
+      "serviceDuration": 1320
+    },
+    {
+      "name": "Visit 7",
+      "location": [
+        46.21294101392614,
+        6.168778766247171
+      ],
+      "load": 5,
+      "minStartTime": "2023-10-10T13:13:00",
+      "maxEndTime": "2023-10-10T14:59:00",
+      "serviceDuration": 2040
+    },
+    {
+      "name": "Visit 8",
+      "location": [
+        46.198613014027856,
+        6.10461411338801
+      ],
+      "load": 15,
+      "minStartTime": "2023-10-10T14:44:00",
+      "maxEndTime": "2023-10-10T16:32:00",
+      "serviceDuration": 2100
+    },
+    {
+      "name": "Visit 9",
+      "location": [
+        46.22184893799127,
+        6.1162425047035205
+      ],
+      "load": 10,
+      "minStartTime": "2023-10-10T15:44:00",
+      "maxEndTime": "2023-10-10T17:00:00",
+      "serviceDuration": 2820
+    },
+    {
+      "name": "Visit 10",
+      "location": [
+        46.18013521767358,
+        6.184023666337139
+      ],
+      "load": 16,
+      "minStartTime": "2023-10-10T08:59:00",
+      "maxEndTime": "2023-10-10T09:52:00",
+      "serviceDuration": 2940
+    },
+    {
+      "name": "Visit 11",
+      "location": [
+        46.20232059283586,
+        6.16079590279207
+      ],
+      "load": 26,
+      "minStartTime": "2023-10-10T11:42:00",
+      "maxEndTime": "2023-10-10T12:28:00",
+      "serviceDuration": 2580
+    },
+    {
+      "name": "Visit 12",
+      "location": [
+        46.194713396219306,
+        6.128333945647275
+      ],
+      "load": 13,
+      "minStartTime": "2023-10-10T14:30:00",
+      "maxEndTime": "2023-10-10T15:52:00",
+      "serviceDuration": 1920
+    },
+    {
+      "name": "Visit 13",
+      "location": [
+        46.22659962744541,
+        6.120982906311174
+      ],
+      "load": 27,
+      "minStartTime": "2023-10-10T13:34:00",
+      "maxEndTime": "2023-10-10T14:20:00",
+      "serviceDuration": 3480
+    },
+    {
+      "name": "Visit 14",
+      "location": [
+        46.2128962281915,
+        6.193592532699192
+      ],
+      "load": 28,
+      "minStartTime": "2023-10-10T08:33:00",
+      "maxEndTime": "2023-10-10T10:02:00",
+      "serviceDuration": 3480
+    },
+    {
+      "name": "Visit 15",
+      "location": [
+        46.19255947030952,
+        6.133778082523476
+      ],
+      "load": 17,
+      "minStartTime": "2023-10-10T09:39:00",
+      "maxEndTime": "2023-10-10T11:34:00",
+      "serviceDuration": 3240
+    },
+    {
+      "name": "Visit 16",
+      "location": [
+        46.19444357036348,
+        6.153842750440994
+      ],
+      "load": 6,
+      "minStartTime": "2023-10-10T12:56:00",
+      "maxEndTime": "2023-10-10T13:53:00",
+      "serviceDuration": 1620
+    },
+    {
+      "name": "Visit 17",
+      "location": [
+        46.21880914390998,
+        6.143831488801102
+      ],
+      "load": 7,
+      "minStartTime": "2023-10-10T11:20:00",
+      "maxEndTime": "2023-10-10T12:54:00",
+      "serviceDuration": 1200
+    },
+    {
+      "name": "Visit 18",
+      "location": [
+        46.17510234556157,
+        6.133891878352659
+      ],
+      "load": 12,
+      "minStartTime": "2023-10-10T15:13:00",
+      "maxEndTime": "2023-10-10T15:58:00",
+      "serviceDuration": 1500
+    },
+    {
+      "name": "Visit 19",
+      "location": [
+        46.20369017212849,
+        6.190229851030822
+      ],
+      "load": 28,
+      "minStartTime": "2023-10-10T16:46:00",
+      "maxEndTime": "2023-10-10T17:00:00",
+      "serviceDuration": 1980
+    },
+    {
+      "name": "Visit 20",
+      "location": [
+        46.19263554967772,
+        6.137479831740645
+      ],
+      "load": 5,
+      "minStartTime": "2023-10-10T11:46:00",
+      "maxEndTime": "2023-10-10T12:50:00",
+      "serviceDuration": 2880
+    },
+    {
+      "name": "Visit 21",
+      "location": [
+        46.219712980124214,
+        6.178100612555551
+      ],
+      "load": 15,
+      "minStartTime": "2023-10-10T14:16:00",
+      "maxEndTime": "2023-10-10T14:47:00",
+      "serviceDuration": 1320
+    },
+    {
+      "name": "Visit 22",
+      "location": [
+        46.22203110659962,
+        6.190673762397899
+      ],
+      "load": 9,
+      "minStartTime": "2023-10-10T15:55:00",
+      "maxEndTime": "2023-10-10T17:00:00",
+      "serviceDuration": 2700
+    },
+    {
+      "name": "Visit 23",
+      "location": [
+        46.208293128009366,
+        6.1143681681877
+      ],
+      "load": 20,
+      "minStartTime": "2023-10-10T13:57:00",
+      "maxEndTime": "2023-10-10T15:16:00",
+      "serviceDuration": 2040
+    },
+    {
+      "name": "Visit 24",
+      "location": [
+        46.20734758748893,
+        6.106195818755164
+      ],
+      "load": 28,
+      "minStartTime": "2023-10-10T13:36:00",
+      "maxEndTime": "2023-10-10T15:22:00",
+      "serviceDuration": 1620
+    },
+    {
+      "name": "Visit 25",
+      "location": [
+        46.17861717803603,
+        6.126094260420791
+      ],
+      "load": 5,
+      "minStartTime": "2023-10-10T08:09:00",
+      "maxEndTime": "2023-10-10T10:09:00",
+      "serviceDuration": 1680
+    },
+    {
+      "name": "Visit 26",
+      "location": [
+        46.17487008325786,
+        6.1580550413987565
+      ],
+      "load": 16,
+      "minStartTime": "2023-10-10T08:38:00",
+      "maxEndTime": "2023-10-10T09:33:00",
+      "serviceDuration": 900
+    },
+    {
+      "name": "Visit 27",
+      "location": [
+        46.172782037898656,
+        6.15852417030364
+      ],
+      "load": 17,
+      "minStartTime": "2023-10-10T12:38:00",
+      "maxEndTime": "2023-10-10T14:13:00",
+      "serviceDuration": 1860
+    },
+    {
+      "name": "Visit 28",
+      "location": [
+        46.184970251922906,
+        6.154580212551157
+      ],
+      "load": 23,
+      "minStartTime": "2023-10-10T15:03:00",
+      "maxEndTime": "2023-10-10T16:24:00",
+      "serviceDuration": 3300
+    },
+    {
+      "name": "Visit 29",
+      "location": [
+        46.21936666308194,
+        6.160712258560022
+      ],
+      "load": 11,
+      "minStartTime": "2023-10-10T11:28:00",
+      "maxEndTime": "2023-10-10T12:22:00",
+      "serviceDuration": 1260
+    },
+    {
+      "name": "Visit 30",
+      "location": [
+        46.182568098770545,
+        6.186320609448915
+      ],
+      "load": 9,
+      "minStartTime": "2023-10-10T08:28:00",
+      "maxEndTime": "2023-10-10T09:54:00",
+      "serviceDuration": 2820
+    }
+  ]
 }

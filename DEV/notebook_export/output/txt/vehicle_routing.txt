@@ -1,0 +1,350 @@
+# Vehicle routing with Timefold in a Kotlin notebook
+
+This notebook solves a simple Capacitated Vehicle Routing Problem (CVRP) in Kotlin with Timefold, the open source solver AI.
+
+Input:
+* A set of visits with a location and a load
+* A set of vehicles with a home location and a capacity
+
+Output:
+* Each visit assigned to a vehicle
+* Per vehicle the order in which to travel to the visits assigned to it
+
+Constraints:
+* Hard: Do not exceed the capacity of each visit.
+* Soft: Minimize the travel distance.
+
+## Dependencies
+
+Let's use Timefold to optimize the vehicle routing problem and jackson to read the input JSON file:
+
+// Code
+
+@file:DependsOn("ai.timefold.solver:timefold-solver-core:1.11.0")
+@file:DependsOn("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.1")
+
+// End Code
+
+## Data classes
+
+### Location
+
+A location is a point on the earth, specified by a latitude and a longitude:
+
+// Code
+
+import com.fasterxml.jackson.annotation.JsonFormat
+
+@JsonFormat(shape = JsonFormat.Shape.ARRAY)
+data class Location(
+    val latitude: Double,
+    val longitude: Double) {
+    
+    fun calcEuclideanDistanceTo(other: Location): Double {
+        val xDifference = latitude - other.latitude
+        val yDifference = longitude - other.longitude
+        return Math.sqrt(xDifference * xDifference + yDifference * yDifference)
+    }
+    
+}
+
+// End Code
+
+### Visit
+
+Each visit has a name, a location and a load to be delivered:
+
+// Code
+
+import java.time.Duration
+
+data class Visit(
+    val name: String,
+    val location: Location,
+    val load: Int) {
+
+    override fun toString(): String = name
+}
+
+// End Code
+
+### Vehicle
+
+Each vehicle has a name, a home location and a capacity.
+
+The solver assigns each visit to a vehicle and decides the best order of the visits per vehicle.
+Therefor, the `Vehicle` class is a `@PlanningEntity`, because it changes during solving.
+Its `visits` field is a `@PlanningListVariable`, because the solver fills it in.
+
+// Code
+
+import ai.timefold.solver.core.api.domain.entity.PlanningEntity
+import ai.timefold.solver.core.api.domain.variable.PlanningListVariable
+
+
+@PlanningEntity
+data class Vehicle(
+    val name: String,
+    val homeLocation: Location,
+    val capacity: Int) {
+
+    @PlanningListVariable
+    var visits: MutableList<Visit> = ArrayList()
+    
+    // No-arg constructor required for Timefold
+    constructor() : this("", Location(0.0, 0.0), 0)
+
+    override fun toString(): String = name
+}
+
+// End Code
+
+## Constraints
+
+There are hard and soft constraints:
+
+// Code
+
+import ai.timefold.solver.core.api.score.buildin.hardsoftlong.HardSoftLongScore
+import ai.timefold.solver.core.api.score.stream.Constraint
+import ai.timefold.solver.core.api.score.stream.ConstraintFactory
+import ai.timefold.solver.core.api.score.stream.ConstraintProvider
+import ai.timefold.solver.core.api.score.stream.Joiners
+import java.time.Duration
+
+class VehicleRoutingConstraintProvider : ConstraintProvider {
+
+    override fun defineConstraints(constraintFactory: ConstraintFactory): Array<Constraint>? {
+        return arrayOf(
+            // Hard constraints
+            capacity(constraintFactory),
+            // Soft constraints
+            minimizeDistance(constraintFactory)
+        )
+    }
+    
+    fun capacity(constraintFactory: ConstraintFactory): Constraint {
+        // TODO Not the most efficient implementation
+        return constraintFactory
+            .forEach(Vehicle::class.java)
+            .expand({ vehicle -> vehicle.visits.sumOf { it.load } })
+            .filter({ vehicle, load -> load > vehicle.capacity })
+            .penalizeLong(HardSoftLongScore.ONE_HARD,
+                { vehicle, load -> (load - vehicle.capacity).toLong() })
+            .asConstraint("vehicle-routing", "Capacity");
+    }
+    
+    fun minimizeDistance(constraintFactory: ConstraintFactory): Constraint {
+        // TODO Not the most efficient implementation
+        return constraintFactory
+            .forEach(Vehicle::class.java)
+            .penalizeLong(HardSoftLongScore.ONE_SOFT, { vehicle ->
+                var distance: Double = 0.0
+                var previousLocation: Location = vehicle.homeLocation
+                for (visit in vehicle.visits) {
+                    distance += previousLocation.calcEuclideanDistanceTo(visit.location)
+                    previousLocation = visit.location
+                }
+                distance += previousLocation.calcEuclideanDistanceTo(vehicle.homeLocation)
+                (distance * 1_000_000.0).toLong()
+            })
+            .asConstraint("vehicle-routing", "Minimize distance");
+    }
+
+}
+
+// End Code
+
+## Schedule
+
+The `Schedule` class holds the entire dataset.
+It contains the list of all vehicles (the entities the solver must fill in) and a list of all visits (the values it needs to assign to those entities).
+
+// Code
+
+import ai.timefold.solver.core.api.domain.solution.PlanningEntityCollectionProperty
+import ai.timefold.solver.core.api.domain.solution.PlanningScore
+import ai.timefold.solver.core.api.domain.solution.PlanningSolution
+import ai.timefold.solver.core.api.domain.solution.ProblemFactCollectionProperty
+import ai.timefold.solver.core.api.domain.valuerange.ValueRangeProvider
+import ai.timefold.solver.core.api.score.buildin.hardsoftlong.HardSoftLongScore
+
+
+@PlanningSolution
+data class Schedule(
+    val name: String,
+    @PlanningEntityCollectionProperty
+    val vehicles: List<Vehicle>,
+    @ProblemFactCollectionProperty
+    @ValueRangeProvider
+    val visits: List<Visit>) {
+
+    @PlanningScore
+    var score: HardSoftLongScore? = null
+
+    // No-arg constructor required for Timefold
+    constructor() : this("", emptyList(), emptyList())
+
+}
+
+// End Code
+
+## Read the input data
+
+Read the input dataset from a JSON file into a `Schedule` instance:
+
+// Code
+
+import java.io.File
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+
+val mapper = jacksonObjectMapper()
+val problem: Schedule =  mapper.readValue(File("vehicle-routing-data.json"))
+
+// End Code
+
+## Solve
+
+Let's solve for 30 seconds:
+
+// Code
+
+import ai.timefold.solver.core.config.solver.SolverConfig
+import ai.timefold.solver.core.api.solver.SolverFactory
+import ai.timefold.solver.core.api.solver.Solver
+
+val solverFactory: SolverFactory<Schedule> = SolverFactory.create(SolverConfig()
+        .withSolutionClass(Schedule::class.java)
+        .withEntityClasses(Vehicle::class.java)
+        .withConstraintProviderClass(VehicleRoutingConstraintProvider::class.java)
+        // The solver runs only for 5 seconds on this small dataset.
+        // It's recommended to run for at least 5 minutes ("5m") otherwise.
+        .withTerminationSpentLimit(Duration.ofSeconds(5)))
+
+println("Solving the problem ...")
+val solver: Solver<Schedule> = solverFactory.buildSolver()
+val solution: Schedule = solver.solve(problem)
+println("Solving finished with score (${solution.score}).")
+
+// End Code
+
+## Print the schedule
+
+Print the visits per vehicle:
+
+// Code
+
+HTML(buildString {
+    append("<p style='font-size: x-large'>Score: ${solution.score}</p>")
+    append("<ul>")
+    for (vehicle in solution.vehicles) {
+        append("<li>${vehicle.name}: ${vehicle.visits.joinToString(", ")}</li>")
+    }
+    append("</ul>")
+})
+
+// End Code
+
+## Visualization
+
+Visualize the solution:
+
+// Code
+
+%use lets-plot
+%use lets-plot-gt
+
+// End Code
+
+### Map
+
+// Code
+
+val locations = mutableListOf<Location>()
+solution.vehicles.forEach { vehicle ->
+    locations.add(vehicle.homeLocation)
+    locations.addAll(vehicle.visits.map { it.location })
+    locations.add(vehicle.homeLocation)
+}
+
+val dataset = mapOf(
+        "latitude" to locations.map { it.latitude },
+        "longitude" to locations.map { it.longitude },
+)
+
+print("The notebook must be trusted for the map to render.")
+letsPlot(dataset) + geomPath() { x = "longitude"; y = "latitude" }
+
+// End Code
+
+## Statistics
+
+For a big dataset, a schedule visualization is often too verbose.
+Let's visualize the solution through statistics:
+
+// Code
+
+%use kandy
+
+// End Code
+
+### Visits per vehicle
+
+// Code
+
+val vehicles = solution.vehicles.map { it.name }
+val visitCounts = solution.vehicles.map { it.visits.size }
+
+plot {
+    layout.title = "Visits per vehicle"
+    bars {
+        x(vehicles) { axis.name = "Vehicle" }
+        y(visitCounts) { axis.name = "Visits" }
+    }
+}
+
+// End Code
+
+### Load per vehicle
+
+// Code
+
+val vehicles = solution.vehicles.map { it.name }
+val load = solution.vehicles.map { it.visits.sumOf { it.load } }
+
+plot {
+    layout.title = "Load per vehicle"
+    bars {
+        x(vehicles) { axis.name = "Vehicle" }
+        y(load) { axis.name = "Load" }
+    }
+}
+
+// End Code
+
+## Analyze the score
+
+Break down the score per constraint and print it:
+
+// Code
+
+import ai.timefold.solver.core.api.solver.SolutionManager
+
+val solutionManager = SolutionManager.create(solverFactory)
+val scoreAnalysis = solutionManager.analyze(solution)
+
+HTML(buildString {
+    append("<p style='font-size: x-large'>Score: ${scoreAnalysis.score}</p>")
+    append("<ul>")
+    for (constraint in scoreAnalysis.constraintMap().values) {
+        append("<li>${constraint.constraintRef().constraintName}: ${constraint.score.toShortString()}</li>")
+    }
+    append("</ul>")
+})
+
+// End Code
+
+## Conclusion
+
+To learn more about planning optimization, visit [timefold.ai](https://timefold.ai).

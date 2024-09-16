@@ -1,0 +1,1680 @@
+{
+    "cells": [
+     {
+      "cell_type": "markdown",
+      "source": [
+       "# Vehicle routing with Timefold in a Kotlin notebook\n",
+       "\n",
+       "This notebook solves a simple Capacitated Vehicle Routing Problem (CVRP) in Kotlin with Timefold, the open source solver AI.\n",
+       "\n",
+       "Input:\n",
+       "* A set of visits with a location and a load\n",
+       "* A set of vehicles with a home location and a capacity\n",
+       "\n",
+       "Output:\n",
+       "* Each visit assigned to a vehicle\n",
+       "* Per vehicle the order in which to travel to the visits assigned to it\n",
+       "\n",
+       "Constraints:\n",
+       "* Hard: Do not exceed the capacity of each visit.\n",
+       "* Soft: Minimize the travel distance.\n",
+       "\n",
+       "## Dependencies\n",
+       "\n",
+       "Let's use Timefold to optimize the vehicle routing problem and jackson to read the input JSON file:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "@file:DependsOn(\"ai.timefold.solver:timefold-solver-core:1.11.0\")\n",
+       "@file:DependsOn(\"com.fasterxml.jackson.module:jackson-module-kotlin:2.17.1\")"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:52.817802Z",
+        "start_time": "2024-06-29T07:40:52.750516Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 16
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Data classes\n",
+       "\n",
+       "### Location\n",
+       "\n",
+       "A location is a point on the earth, specified by a latitude and a longitude:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import com.fasterxml.jackson.annotation.JsonFormat\n",
+       "\n",
+       "@JsonFormat(shape = JsonFormat.Shape.ARRAY)\n",
+       "data class Location(\n",
+       "    val latitude: Double,\n",
+       "    val longitude: Double) {\n",
+       "    \n",
+       "    fun calcEuclideanDistanceTo(other: Location): Double {\n",
+       "        val xDifference = latitude - other.latitude\n",
+       "        val yDifference = longitude - other.longitude\n",
+       "        return Math.sqrt(xDifference * xDifference + yDifference * yDifference)\n",
+       "    }\n",
+       "    \n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:52.863991Z",
+        "start_time": "2024-06-29T07:40:52.818570Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 17
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Visit\n",
+       "\n",
+       "Each visit has a name, a location and a load to be delivered:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import java.time.Duration\n",
+       "\n",
+       "data class Visit(\n",
+       "    val name: String,\n",
+       "    val location: Location,\n",
+       "    val load: Int) {\n",
+       "\n",
+       "    override fun toString(): String = name\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:52.896663Z",
+        "start_time": "2024-06-29T07:40:52.864679Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 18
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Vehicle\n",
+       "\n",
+       "Each vehicle has a name, a home location and a capacity.\n",
+       "\n",
+       "The solver assigns each visit to a vehicle and decides the best order of the visits per vehicle.\n",
+       "Therefor, the `Vehicle` class is a `@PlanningEntity`, because it changes during solving.\n",
+       "Its `visits` field is a `@PlanningListVariable`, because the solver fills it in.\n"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.api.domain.entity.PlanningEntity\n",
+       "import ai.timefold.solver.core.api.domain.variable.PlanningListVariable\n",
+       "\n",
+       "\n",
+       "@PlanningEntity\n",
+       "data class Vehicle(\n",
+       "    val name: String,\n",
+       "    val homeLocation: Location,\n",
+       "    val capacity: Int) {\n",
+       "\n",
+       "    @PlanningListVariable\n",
+       "    var visits: MutableList<Visit> = ArrayList()\n",
+       "    \n",
+       "    // No-arg constructor required for Timefold\n",
+       "    constructor() : this(\"\", Location(0.0, 0.0), 0)\n",
+       "\n",
+       "    override fun toString(): String = name\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:52.945792Z",
+        "start_time": "2024-06-29T07:40:52.897423Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 19
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Constraints\n",
+       "\n",
+       "There are hard and soft constraints:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.api.score.buildin.hardsoftlong.HardSoftLongScore\n",
+       "import ai.timefold.solver.core.api.score.stream.Constraint\n",
+       "import ai.timefold.solver.core.api.score.stream.ConstraintFactory\n",
+       "import ai.timefold.solver.core.api.score.stream.ConstraintProvider\n",
+       "import ai.timefold.solver.core.api.score.stream.Joiners\n",
+       "import java.time.Duration\n",
+       "\n",
+       "class VehicleRoutingConstraintProvider : ConstraintProvider {\n",
+       "\n",
+       "    override fun defineConstraints(constraintFactory: ConstraintFactory): Array<Constraint>? {\n",
+       "        return arrayOf(\n",
+       "            // Hard constraints\n",
+       "            capacity(constraintFactory),\n",
+       "            // Soft constraints\n",
+       "            minimizeDistance(constraintFactory)\n",
+       "        )\n",
+       "    }\n",
+       "    \n",
+       "    fun capacity(constraintFactory: ConstraintFactory): Constraint {\n",
+       "        // TODO Not the most efficient implementation\n",
+       "        return constraintFactory\n",
+       "            .forEach(Vehicle::class.java)\n",
+       "            .expand({ vehicle -> vehicle.visits.sumOf { it.load } })\n",
+       "            .filter({ vehicle, load -> load > vehicle.capacity })\n",
+       "            .penalizeLong(HardSoftLongScore.ONE_HARD,\n",
+       "                { vehicle, load -> (load - vehicle.capacity).toLong() })\n",
+       "            .asConstraint(\"vehicle-routing\", \"Capacity\");\n",
+       "    }\n",
+       "    \n",
+       "    fun minimizeDistance(constraintFactory: ConstraintFactory): Constraint {\n",
+       "        // TODO Not the most efficient implementation\n",
+       "        return constraintFactory\n",
+       "            .forEach(Vehicle::class.java)\n",
+       "            .penalizeLong(HardSoftLongScore.ONE_SOFT, { vehicle ->\n",
+       "                var distance: Double = 0.0\n",
+       "                var previousLocation: Location = vehicle.homeLocation\n",
+       "                for (visit in vehicle.visits) {\n",
+       "                    distance += previousLocation.calcEuclideanDistanceTo(visit.location)\n",
+       "                    previousLocation = visit.location\n",
+       "                }\n",
+       "                distance += previousLocation.calcEuclideanDistanceTo(vehicle.homeLocation)\n",
+       "                (distance * 1_000_000.0).toLong()\n",
+       "            })\n",
+       "            .asConstraint(\"vehicle-routing\", \"Minimize distance\");\n",
+       "    }\n",
+       "\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:53.054735Z",
+        "start_time": "2024-06-29T07:40:52.946507Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 20
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Schedule\n",
+       "\n",
+       "The `Schedule` class holds the entire dataset.\n",
+       "It contains the list of all vehicles (the entities the solver must fill in) and a list of all visits (the values it needs to assign to those entities)."
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.api.domain.solution.PlanningEntityCollectionProperty\n",
+       "import ai.timefold.solver.core.api.domain.solution.PlanningScore\n",
+       "import ai.timefold.solver.core.api.domain.solution.PlanningSolution\n",
+       "import ai.timefold.solver.core.api.domain.solution.ProblemFactCollectionProperty\n",
+       "import ai.timefold.solver.core.api.domain.valuerange.ValueRangeProvider\n",
+       "import ai.timefold.solver.core.api.score.buildin.hardsoftlong.HardSoftLongScore\n",
+       "\n",
+       "\n",
+       "@PlanningSolution\n",
+       "data class Schedule(\n",
+       "    val name: String,\n",
+       "    @PlanningEntityCollectionProperty\n",
+       "    val vehicles: List<Vehicle>,\n",
+       "    @ProblemFactCollectionProperty\n",
+       "    @ValueRangeProvider\n",
+       "    val visits: List<Visit>) {\n",
+       "\n",
+       "    @PlanningScore\n",
+       "    var score: HardSoftLongScore? = null\n",
+       "\n",
+       "    // No-arg constructor required for Timefold\n",
+       "    constructor() : this(\"\", emptyList(), emptyList())\n",
+       "\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:53.105289Z",
+        "start_time": "2024-06-29T07:40:53.055746Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 21
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Read the input data\n",
+       "\n",
+       "Read the input dataset from a JSON file into a `Schedule` instance:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import java.io.File\n",
+       "import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper\n",
+       "import com.fasterxml.jackson.module.kotlin.readValue\n",
+       "\n",
+       "val mapper = jacksonObjectMapper()\n",
+       "val problem: Schedule =  mapper.readValue(File(\"vehicle-routing-data.json\"))"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:53.152111Z",
+        "start_time": "2024-06-29T07:40:53.105944Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 22
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Solve\n",
+       "\n",
+       "Let's solve for 30 seconds:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.config.solver.SolverConfig\n",
+       "import ai.timefold.solver.core.api.solver.SolverFactory\n",
+       "import ai.timefold.solver.core.api.solver.Solver\n",
+       "\n",
+       "val solverFactory: SolverFactory<Schedule> = SolverFactory.create(SolverConfig()\n",
+       "        .withSolutionClass(Schedule::class.java)\n",
+       "        .withEntityClasses(Vehicle::class.java)\n",
+       "        .withConstraintProviderClass(VehicleRoutingConstraintProvider::class.java)\n",
+       "        // The solver runs only for 5 seconds on this small dataset.\n",
+       "        // It's recommended to run for at least 5 minutes (\"5m\") otherwise.\n",
+       "        .withTerminationSpentLimit(Duration.ofSeconds(5)))\n",
+       "\n",
+       "println(\"Solving the problem ...\")\n",
+       "val solver: Solver<Schedule> = solverFactory.buildSolver()\n",
+       "val solution: Schedule = solver.solve(problem)\n",
+       "println(\"Solving finished with score (${solution.score}).\")"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:58.203503Z",
+        "start_time": "2024-06-29T07:40:53.152916Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stdout",
+        "output_type": "stream",
+        "text": [
+         "Solving the problem ...\n",
+         "Solving finished with score (0hard/-24094376soft).\n"
+        ]
+       }
+      ],
+      "execution_count": 23
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Print the schedule\n",
+       "\n",
+       "Print the visits per vehicle:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "HTML(buildString {\n",
+       "    append(\"<p style='font-size: x-large'>Score: ${solution.score}</p>\")\n",
+       "    append(\"<ul>\")\n",
+       "    for (vehicle in solution.vehicles) {\n",
+       "        append(\"<li>${vehicle.name}: ${vehicle.visits.joinToString(\", \")}</li>\")\n",
+       "    }\n",
+       "    append(\"</ul>\")\n",
+       "})"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:40:58.238623Z",
+        "start_time": "2024-06-29T07:40:58.204010Z"
+       }
+      },
+      "outputs": [
+       {
+        "data": {
+         "text/html": [
+          "<p style='font-size: x-large'>Score: 0hard/-24094376soft</p><ul><li>Vehicle A: JURBISE, CHIEVRES, MAFFLE, GONDREGNIES, PEPINGEN</li><li>Vehicle B: KOMEN, ELVERDINGE, RENINGE, BULSKAMP, LISSEWEGE, DAMME, LANDEGEM, NIEUWKERKEN-WAAS</li><li>Vehicle C: LES_BONS_VILLERS, HEPPIGNIES, ORET, MONT_NAM., EVELETTE, WARNANT-DREYE</li><li>Vehicle D: FONTAINE-L'EVEQUE, SOMZEE, SAINT-MARTIN, VOSSEM</li><li>Vehicle E: OLLIGNIES, MAULDE, GUIGNIES, BAVIKHOVE, WETTEREN</li><li>Vehicle F: DONSTIENNES, BOURLERS, BERSILLIES-L'ABBAYE, NAAST, SINT-KWINTENS-LENNIK</li><li>Vehicle G: AVE-ET-AUFFE, POUPEHAN, VAUX-LEZ-ROSIERES, SELANGE, TAILLES, ANTHISNES</li><li>Vehicle H: HUMBEEK, HOFSTADE_BT., HAREN_BRUSSEL</li><li>Vehicle I: GELINDEN, VILLERS-L'EVEQUE, ROSMEER, MERKSPLAS</li><li>Vehicle J: TILFF, XHENDELESSE, BLERET</li></ul>"
+         ]
+        },
+        "execution_count": 24,
+        "metadata": {},
+        "output_type": "execute_result"
+       }
+      ],
+      "execution_count": 24
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Visualization\n",
+       "\n",
+       "Visualize the solution:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "%use lets-plot\n",
+       "%use lets-plot-gt"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:41:09.507058Z",
+        "start_time": "2024-06-29T07:40:58.239054Z"
+       }
+      },
+      "outputs": [
+       {
+        "data": {
+         "text/html": [
+          "   <div id=\"0g6LVW\"></div>\n",
+          "   <script type=\"text/javascript\" data-lets-plot-script=\"library\">\n",
+          "       if(!window.letsPlotCallQueue) {\n",
+          "           window.letsPlotCallQueue = [];\n",
+          "       }; \n",
+          "       window.letsPlotCall = function(f) {\n",
+          "           window.letsPlotCallQueue.push(f);\n",
+          "       };\n",
+          "       (function() {\n",
+          "           var script = document.createElement(\"script\");\n",
+          "           script.type = \"text/javascript\";\n",
+          "           script.src = \"https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.3.2/js-package/distr/lets-plot.min.js\";\n",
+          "           script.onload = function() {\n",
+          "               window.letsPlotCall = function(f) {f();};\n",
+          "               window.letsPlotCallQueue.forEach(function(f) {f();});\n",
+          "               window.letsPlotCallQueue = [];\n",
+          "               \n",
+          "               \n",
+          "           };\n",
+          "           script.onerror = function(event) {\n",
+          "               window.letsPlotCall = function(f) {};\n",
+          "               window.letsPlotCallQueue = [];\n",
+          "               var div = document.createElement(\"div\");\n",
+          "               div.style.color = 'darkred';\n",
+          "               div.textContent = 'Error loading Lets-Plot JS';\n",
+          "               document.getElementById(\"0g6LVW\").appendChild(div);\n",
+          "           };\n",
+          "           var e = document.getElementById(\"0g6LVW\");\n",
+          "           e.appendChild(script);\n",
+          "       })();\n",
+          "   </script>"
+         ]
+        },
+        "metadata": {},
+        "output_type": "display_data"
+       }
+      ],
+      "execution_count": 25
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Map"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "val locations = mutableListOf<Location>()\n",
+       "solution.vehicles.forEach { vehicle ->\n",
+       "    locations.add(vehicle.homeLocation)\n",
+       "    locations.addAll(vehicle.visits.map { it.location })\n",
+       "    locations.add(vehicle.homeLocation)\n",
+       "}\n",
+       "\n",
+       "val dataset = mapOf(\n",
+       "        \"latitude\" to locations.map { it.latitude },\n",
+       "        \"longitude\" to locations.map { it.longitude },\n",
+       ")\n",
+       "\n",
+       "print(\"The notebook must be trusted for the map to render.\")\n",
+       "letsPlot(dataset) + geomPath() { x = \"longitude\"; y = \"latitude\" }"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:41:09.594765Z",
+        "start_time": "2024-06-29T07:41:09.508077Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stdout",
+        "output_type": "stream",
+        "text": [
+         "The notebook must be trusted for the map to render."
+        ]
+       },
+       {
+        "data": {
+         "text/html": [
+          "   <div id=\"sNu2aY\"></div>\n",
+          "   <script type=\"text/javascript\" data-lets-plot-script=\"plot\">\n",
+          "       (function() {\n",
+          "           var plotSpec={\n",
+          "\"mapping\":{\n",
+          "},\n",
+          "\"data\":{\n",
+          "\"latitude\":[50.8427501,50.5208191,50.5661351,50.6200815,50.6271045,50.7360287,50.8427501,50.8427501,50.77614,50.8848669,50.9477884,51.0432467,51.2948381,51.2365829,51.0566021,51.1936164,50.8427501,50.8427501,50.5427462,50.4814121,50.2998711,50.3534706,50.411922,50.5951652,50.8427501,50.8427501,50.4100558,50.2950667,50.5009515,50.8346073,50.8427501,50.8427501,50.6876172,50.6165736,50.5499808,50.8753581,51.0005742,50.8427501,50.8427501,50.2849958,50.025208,50.2624949,50.5504316,50.8068661,50.8427501,50.8427501,50.1085676,49.8122243,49.9102794,49.6096472,50.2273877,50.4812987,50.8427501,50.8427501,50.9667658,50.9912912,50.8919578,50.8427501,50.8427501,50.7670559,50.7044254,50.8460854,51.361787,50.8427501,50.8427501,50.5695196,50.6061517,50.688785,50.8427501],\n",
+          "\"longitude\":[4.3515499,3.9017078,3.7853169,3.8018102,3.9115699,4.1360863,4.3515499,4.3515499,3.007366,2.8162074,2.7891722,2.6501345,3.1994146,3.3400765,3.573045,4.1787815,4.3515499,4.3515499,4.4476802,4.4932598,4.6155651,4.9014191,5.173705,5.2276287,4.3515499,4.3515499,4.3249526,4.4831638,4.6473657,4.557627,4.3515499,4.3515499,3.8574228,3.5470846,3.3727285,3.3113744,3.8693544,4.3515499,4.3515499,4.3106966,4.3409814,4.1523037,4.0964803,4.1538281,4.3515499,4.3515499,5.1429583,5.0029,5.5659053,5.8560275,5.7437507,5.5198048,4.3515499,4.3515499,4.3834362,4.492735,4.4182942,4.3515499,4.3515499,5.2628934,5.4399729,5.5750235,4.861625,4.3515499,4.3515499,5.5844061,5.7830075,5.2859129,4.3515499]\n",
+          "},\n",
+          "\"kind\":\"plot\",\n",
+          "\"scales\":[],\n",
+          "\"layers\":[{\n",
+          "\"mapping\":{\n",
+          "\"x\":\"longitude\",\n",
+          "\"y\":\"latitude\"\n",
+          "},\n",
+          "\"stat\":\"identity\",\n",
+          "\"position\":\"identity\",\n",
+          "\"geom\":\"path\",\n",
+          "\"data\":{\n",
+          "}\n",
+          "}]\n",
+          "};\n",
+          "           var plotContainer = document.getElementById(\"sNu2aY\");\n",
+          "           window.letsPlotCall(function() {{\n",
+          "               LetsPlot.buildPlotFromProcessedSpecs(plotSpec, -1, -1, plotContainer);\n",
+          "           }});\n",
+          "       })();\n",
+          "   </script>"
+         ]
+        },
+        "execution_count": 26,
+        "metadata": {},
+        "output_type": "execute_result"
+       }
+      ],
+      "execution_count": 26
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Statistics\n",
+       "\n",
+       "For a big dataset, a schedule visualization is often too verbose.\n",
+       "Let's visualize the solution through statistics:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "%use kandy"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:41:15.392707Z",
+        "start_time": "2024-06-29T07:41:09.595478Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 27
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Visits per vehicle"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "val vehicles = solution.vehicles.map { it.name }\n",
+       "val visitCounts = solution.vehicles.map { it.visits.size }\n",
+       "\n",
+       "plot {\n",
+       "    layout.title = \"Visits per vehicle\"\n",
+       "    bars {\n",
+       "        x(vehicles) { axis.name = \"Vehicle\" }\n",
+       "        y(visitCounts) { axis.name = \"Visits\" }\n",
+       "    }\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:41:15.459461Z",
+        "start_time": "2024-06-29T07:41:15.393382Z"
+       }
+      },
+      "outputs": [
+       {
+        "data": {
+         "text/html": [
+          "            <iframe src='about:blank' style='border:none !important;' width='600' height='400' srcdoc=\"&lt;html lang=&quot;en&quot;>\n",
+          "   &lt;head>\n",
+          "       &lt;meta charset=&quot;UTF-8&quot;>\n",
+          "       &lt;style> html, body { margin: 0; overflow: hidden; } &lt;/style>\n",
+          "       &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;library&quot; src=&quot;https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.2.0/js-package/distr/lets-plot.min.js&quot;>&lt;/script>\n",
+          "   &lt;/head>\n",
+          "   &lt;body>\n",
+          "          &lt;div id=&quot;3D5AlT&quot;>&lt;/div>\n",
+          "   &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;plot&quot;>\n",
+          "       var plotSpec={\n",
+          "&quot;ggtitle&quot;:{\n",
+          "&quot;text&quot;:&quot;Visits per vehicle&quot;\n",
+          "},\n",
+          "&quot;mapping&quot;:{\n",
+          "},\n",
+          "&quot;data&quot;:{\n",
+          "},\n",
+          "&quot;kind&quot;:&quot;plot&quot;,\n",
+          "&quot;scales&quot;:[{\n",
+          "&quot;aesthetic&quot;:&quot;x&quot;,\n",
+          "&quot;discrete&quot;:true,\n",
+          "&quot;name&quot;:&quot;Vehicle&quot;\n",
+          "},{\n",
+          "&quot;aesthetic&quot;:&quot;y&quot;,\n",
+          "&quot;name&quot;:&quot;Visits&quot;,\n",
+          "&quot;limits&quot;:[null,null]\n",
+          "}],\n",
+          "&quot;layers&quot;:[{\n",
+          "&quot;mapping&quot;:{\n",
+          "&quot;x&quot;:&quot;x&quot;,\n",
+          "&quot;y&quot;:&quot;y&quot;\n",
+          "},\n",
+          "&quot;stat&quot;:&quot;identity&quot;,\n",
+          "&quot;data&quot;:{\n",
+          "&quot;x&quot;:[&quot;Vehicle A&quot;,&quot;Vehicle B&quot;,&quot;Vehicle C&quot;,&quot;Vehicle D&quot;,&quot;Vehicle E&quot;,&quot;Vehicle F&quot;,&quot;Vehicle G&quot;,&quot;Vehicle H&quot;,&quot;Vehicle I&quot;,&quot;Vehicle J&quot;],\n",
+          "&quot;y&quot;:[5.0,8.0,6.0,4.0,5.0,5.0,6.0,3.0,4.0,3.0]\n",
+          "},\n",
+          "&quot;sampling&quot;:&quot;none&quot;,\n",
+          "&quot;position&quot;:&quot;dodge&quot;,\n",
+          "&quot;geom&quot;:&quot;bar&quot;\n",
+          "}]\n",
+          "};\n",
+          "       var plotContainer = document.getElementById(&quot;3D5AlT&quot;);\n",
+          "       LetsPlot.buildPlotFromProcessedSpecs(plotSpec, -1, -1, plotContainer);\n",
+          "   &lt;/script>\n",
+          "   &lt;/body>\n",
+          "&lt;/html>\"></iframe>            <svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" class=\"plt-container\" id=b77b1d02-4974-40d3-98b9-5dc319ea3b1c width=\"100%\" height=\"100%\" style=\"max-width: 600.0px; max-height: 400.0px;\" viewBox=\"0 0 600.0 400.0\" preserveAspectRatio=\"xMinYMin meet\">\n",
+          "  <style type=\"text/css\">\n",
+          "  .plt-container {\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   user-select: none;\n",
+          "   -webkit-user-select: none;\n",
+          "   -moz-user-select: none;\n",
+          "   -ms-user-select: none;\n",
+          "}\n",
+          "text {\n",
+          "   text-rendering: optimizeLegibility;\n",
+          "}\n",
+          "#p9NMEhR .plot-title {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 16.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .plot-subtitle {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 15.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .plot-caption {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .legend-title {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 15.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .legend-item {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .axis-title-x {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 15.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .axis-text-x {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dTsDibn .axis-tooltip-text-x {\n",
+          "   fill: #ffffff;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .axis-title-y {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 15.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .axis-text-y {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dTsDibn .axis-tooltip-text-y {\n",
+          "   fill: #ffffff;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .facet-strip-text-x {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p9NMEhR .facet-strip-text-y {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dTsDibn .tooltip-text {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dTsDibn .tooltip-title {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: bold;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dTsDibn .tooltip-label {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: bold;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "\n",
+          "  </style>\n",
+          "  <g id=\"p9NMEhR\">\n",
+          "    <path fill-rule=\"evenodd\" fill=\"rgb(255,255,255)\" fill-opacity=\"1.0\" d=\"M0.0 0.0 L0.0 400.0 L600.0 400.0 L600.0 0.0 Z\">\n",
+          "    </path>\n",
+          "    <g transform=\"translate(29.5 26.5 ) \">\n",
+          "      <g transform=\"translate(13.980605455468202 0.0 ) \">\n",
+          "        <line x1=\"34.70996179164521\" y1=\"265.6440659298154\" x2=\"34.70996179164521\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"88.10990300956092\" y1=\"265.6440659298154\" x2=\"88.10990300956092\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"141.50984422747663\" y1=\"265.6440659298154\" x2=\"141.50984422747663\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"194.90978544539234\" y1=\"265.6440659298154\" x2=\"194.90978544539234\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"248.30972666330806\" y1=\"265.6440659298154\" x2=\"248.30972666330806\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"301.7096678812238\" y1=\"265.6440659298154\" x2=\"301.7096678812238\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"355.10960909913945\" y1=\"265.6440659298154\" x2=\"355.10960909913945\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"408.5095503170552\" y1=\"265.6440659298154\" x2=\"408.5095503170552\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"461.9094915349709\" y1=\"265.6440659298154\" x2=\"461.9094915349709\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"515.3094327528867\" y1=\"265.6440659298154\" x2=\"515.3094327528867\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "      </g>\n",
+          "      <g transform=\"translate(13.980605455468202 0.0 ) \">\n",
+          "        <line x1=\"0.0\" y1=\"265.6440659298154\" x2=\"550.0193945445318\" y2=\"265.6440659298154\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"202.39547880366888\" x2=\"550.0193945445318\" y2=\"202.39547880366888\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"139.14689167752235\" x2=\"550.0193945445318\" y2=\"139.14689167752235\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"75.89830455137582\" x2=\"550.0193945445318\" y2=\"75.89830455137582\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"12.649717425229312\" x2=\"550.0193945445318\" y2=\"12.649717425229312\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "      </g>\n",
+          "      <g transform=\"translate(13.980605455468202 0.0 ) \" clip-path=\"url(#cB59ODy)\" clip-bounds-jfx=\"[rect (0.0, 0.0), (550.0193945445318, 265.6440659298154)]\">\n",
+          "        <defs>\n",
+          "          <clipPath id=\"cB59ODy\">\n",
+          "            <rect x=\"0.0\" y=\"0.0\" width=\"550.0193945445318\" height=\"265.6440659298154\">\n",
+          "            </rect>\n",
+          "          </clipPath>\n",
+          "        </defs>\n",
+          "        <rect x=\"491.27945920482455\" y=\"170.7711852405956\" height=\"94.87288068921978\" width=\"48.05994709612423\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"437.8795179869088\" y=\"139.14689167752235\" height=\"126.49717425229304\" width=\"48.05994709612412\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"384.47957676899307\" y=\"170.7711852405956\" height=\"94.87288068921978\" width=\"48.05994709612423\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"331.07963555107744\" y=\"75.89830455137582\" height=\"189.74576137843957\" width=\"48.05994709612412\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"277.6796943331617\" y=\"107.5225981144491\" height=\"158.1214678153663\" width=\"48.05994709612412\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"224.27975311524597\" y=\"107.5225981144491\" height=\"158.1214678153663\" width=\"48.059947096124176\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"170.87981189733026\" y=\"139.14689167752235\" height=\"126.49717425229304\" width=\"48.05994709612415\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"117.47987067941456\" y=\"75.89830455137582\" height=\"189.74576137843957\" width=\"48.05994709612416\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"64.07992946149886\" y=\"12.649717425229312\" height=\"252.99434850458607\" width=\"48.059947096124134\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"10.679988243583143\" y=\"107.5225981144491\" height=\"158.1214678153663\" width=\"48.05994709612415\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "      </g>\n",
+          "      <g transform=\"translate(13.980605455468202 265.6440659298154 ) \">\n",
+          "        <g transform=\"translate(34.70996179164521 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle A</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(88.10990300956092 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle B</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(141.50984422747663 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle C</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(194.90978544539234 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle D</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(248.30972666330806 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle E</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(301.7096678812238 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle F</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(355.10960909913945 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle G</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(408.5095503170552 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle H</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(461.9094915349709 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle I</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(515.3094327528867 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle J</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <line x1=\"0.0\" y1=\"0.0\" x2=\"550.0193945445318\" y2=\"0.0\" stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\">\n",
+          "        </line>\n",
+          "      </g>\n",
+          "      <g transform=\"translate(13.980605455468202 0.0 ) \">\n",
+          "        <g transform=\"translate(0.0 265.6440659298154 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>0</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 202.39547880366888 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>2</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 139.14689167752235 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>4</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 75.89830455137582 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>6</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 12.649717425229312 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>8</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "      </g>\n",
+          "    </g>\n",
+          "    <g transform=\"translate(43.4806054554682 16.8 ) \">\n",
+          "      <text class=\"plot-title\" y=\"0.0\">\n",
+          "        <tspan>Visits per vehicle</tspan>\n",
+          "      </text>\n",
+          "    </g>\n",
+          "    <g transform=\"translate(16.0 159.3220329649077 ) rotate(-90.0 ) \">\n",
+          "      <text class=\"axis-title-y\" y=\"0.0\" text-anchor=\"middle\">\n",
+          "        <tspan>Visits</tspan>\n",
+          "      </text>\n",
+          "    </g>\n",
+          "    <g transform=\"translate(318.4903027277341 393.0 ) \">\n",
+          "      <text class=\"axis-title-x\" y=\"0.0\" text-anchor=\"middle\">\n",
+          "        <tspan>Vehicle</tspan>\n",
+          "      </text>\n",
+          "    </g>\n",
+          "    <path fill=\"rgb(0,0,0)\" fill-opacity=\"0.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" stroke-width=\"0.0\" d=\"M0.0 0.0 L0.0 400.0 L600.0 400.0 L600.0 0.0 Z\">\n",
+          "    </path>\n",
+          "  </g>\n",
+          "  <g id=\"dTsDibn\">\n",
+          "  </g>\n",
+          "</svg>\n",
+          "        <script>document.getElementById(\"b77b1d02-4974-40d3-98b9-5dc319ea3b1c\").style.display = \"none\";</script>"
+         ],
+         "application/plot+json": {
+          "output_type": "lets_plot_spec",
+          "output": {
+           "ggtitle": {
+            "text": "Visits per vehicle"
+           },
+           "mapping": {},
+           "data": {},
+           "kind": "plot",
+           "scales": [
+            {
+             "aesthetic": "x",
+             "discrete": true,
+             "name": "Vehicle"
+            },
+            {
+             "aesthetic": "y",
+             "name": "Visits",
+             "limits": [
+              null,
+              null
+             ]
+            }
+           ],
+           "layers": [
+            {
+             "mapping": {
+              "x": "x",
+              "y": "y"
+             },
+             "stat": "identity",
+             "data": {
+              "x": [
+               "Vehicle A",
+               "Vehicle B",
+               "Vehicle C",
+               "Vehicle D",
+               "Vehicle E",
+               "Vehicle F",
+               "Vehicle G",
+               "Vehicle H",
+               "Vehicle I",
+               "Vehicle J"
+              ],
+              "y": [
+               5.0,
+               8.0,
+               6.0,
+               4.0,
+               5.0,
+               5.0,
+               6.0,
+               3.0,
+               4.0,
+               3.0
+              ]
+             },
+             "sampling": "none",
+             "position": "dodge",
+             "geom": "bar"
+            }
+           ]
+          },
+          "apply_color_scheme": true,
+          "swing_enabled": true
+         }
+        },
+        "execution_count": 28,
+        "metadata": {},
+        "output_type": "execute_result"
+       }
+      ],
+      "execution_count": 28
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Load per vehicle"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "val vehicles = solution.vehicles.map { it.name }\n",
+       "val load = solution.vehicles.map { it.visits.sumOf { it.load } }\n",
+       "\n",
+       "plot {\n",
+       "    layout.title = \"Load per vehicle\"\n",
+       "    bars {\n",
+       "        x(vehicles) { axis.name = \"Vehicle\" }\n",
+       "        y(load) { axis.name = \"Load\" }\n",
+       "    }\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:41:15.535780Z",
+        "start_time": "2024-06-29T07:41:15.459976Z"
+       }
+      },
+      "outputs": [
+       {
+        "data": {
+         "text/html": [
+          "            <iframe src='about:blank' style='border:none !important;' width='600' height='400' srcdoc=\"&lt;html lang=&quot;en&quot;>\n",
+          "   &lt;head>\n",
+          "       &lt;meta charset=&quot;UTF-8&quot;>\n",
+          "       &lt;style> html, body { margin: 0; overflow: hidden; } &lt;/style>\n",
+          "       &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;library&quot; src=&quot;https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.2.0/js-package/distr/lets-plot.min.js&quot;>&lt;/script>\n",
+          "   &lt;/head>\n",
+          "   &lt;body>\n",
+          "          &lt;div id=&quot;zttG2k&quot;>&lt;/div>\n",
+          "   &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;plot&quot;>\n",
+          "       var plotSpec={\n",
+          "&quot;ggtitle&quot;:{\n",
+          "&quot;text&quot;:&quot;Load per vehicle&quot;\n",
+          "},\n",
+          "&quot;mapping&quot;:{\n",
+          "},\n",
+          "&quot;data&quot;:{\n",
+          "},\n",
+          "&quot;kind&quot;:&quot;plot&quot;,\n",
+          "&quot;scales&quot;:[{\n",
+          "&quot;aesthetic&quot;:&quot;x&quot;,\n",
+          "&quot;discrete&quot;:true,\n",
+          "&quot;name&quot;:&quot;Vehicle&quot;\n",
+          "},{\n",
+          "&quot;aesthetic&quot;:&quot;y&quot;,\n",
+          "&quot;name&quot;:&quot;Load&quot;,\n",
+          "&quot;limits&quot;:[null,null]\n",
+          "}],\n",
+          "&quot;layers&quot;:[{\n",
+          "&quot;mapping&quot;:{\n",
+          "&quot;x&quot;:&quot;x&quot;,\n",
+          "&quot;y&quot;:&quot;y&quot;\n",
+          "},\n",
+          "&quot;stat&quot;:&quot;identity&quot;,\n",
+          "&quot;data&quot;:{\n",
+          "&quot;x&quot;:[&quot;Vehicle A&quot;,&quot;Vehicle B&quot;,&quot;Vehicle C&quot;,&quot;Vehicle D&quot;,&quot;Vehicle E&quot;,&quot;Vehicle F&quot;,&quot;Vehicle G&quot;,&quot;Vehicle H&quot;,&quot;Vehicle I&quot;,&quot;Vehicle J&quot;],\n",
+          "&quot;y&quot;:[89.0,98.0,100.0,98.0,93.0,88.0,100.0,76.0,94.0,98.0]\n",
+          "},\n",
+          "&quot;sampling&quot;:&quot;none&quot;,\n",
+          "&quot;position&quot;:&quot;dodge&quot;,\n",
+          "&quot;geom&quot;:&quot;bar&quot;\n",
+          "}]\n",
+          "};\n",
+          "       var plotContainer = document.getElementById(&quot;zttG2k&quot;);\n",
+          "       LetsPlot.buildPlotFromProcessedSpecs(plotSpec, -1, -1, plotContainer);\n",
+          "   &lt;/script>\n",
+          "   &lt;/body>\n",
+          "&lt;/html>\"></iframe>            <svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" class=\"plt-container\" id=67d654db-d4fe-490a-b646-92ee5c037c55 width=\"100%\" height=\"100%\" style=\"max-width: 600.0px; max-height: 400.0px;\" viewBox=\"0 0 600.0 400.0\" preserveAspectRatio=\"xMinYMin meet\">\n",
+          "  <style type=\"text/css\">\n",
+          "  .plt-container {\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   user-select: none;\n",
+          "   -webkit-user-select: none;\n",
+          "   -moz-user-select: none;\n",
+          "   -ms-user-select: none;\n",
+          "}\n",
+          "text {\n",
+          "   text-rendering: optimizeLegibility;\n",
+          "}\n",
+          "#p4BWTVf .plot-title {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 16.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .plot-subtitle {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 15.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .plot-caption {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .legend-title {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 15.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .legend-item {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .axis-title-x {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 15.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .axis-text-x {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dWuq7Jw .axis-tooltip-text-x {\n",
+          "   fill: #ffffff;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .axis-title-y {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 15.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .axis-text-y {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dWuq7Jw .axis-tooltip-text-y {\n",
+          "   fill: #ffffff;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .facet-strip-text-x {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#p4BWTVf .facet-strip-text-y {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dWuq7Jw .tooltip-text {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: normal;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dWuq7Jw .tooltip-title {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: bold;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "#dWuq7Jw .tooltip-label {\n",
+          "   fill: #474747;\n",
+          "   font-family: Lucida Grande, sans-serif;\n",
+          "   font-size: 13.0px;\n",
+          "   font-weight: bold;\n",
+          "   font-style: normal;   \n",
+          "}\n",
+          "\n",
+          "  </style>\n",
+          "  <g id=\"p4BWTVf\">\n",
+          "    <path fill-rule=\"evenodd\" fill=\"rgb(255,255,255)\" fill-opacity=\"1.0\" d=\"M0.0 0.0 L0.0 400.0 L600.0 400.0 L600.0 0.0 Z\">\n",
+          "    </path>\n",
+          "    <g transform=\"translate(29.5 26.5 ) \">\n",
+          "      <g transform=\"translate(29.941816366404606 0.0 ) \">\n",
+          "        <line x1=\"33.70270090891621\" y1=\"265.6440659298154\" x2=\"33.70270090891621\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"85.55300999955654\" y1=\"265.6440659298154\" x2=\"85.55300999955654\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"137.40331909019687\" y1=\"265.6440659298154\" x2=\"137.40331909019687\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"189.2536281808372\" y1=\"265.6440659298154\" x2=\"189.2536281808372\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"241.10393727147755\" y1=\"265.6440659298154\" x2=\"241.10393727147755\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"292.95424636211783\" y1=\"265.6440659298154\" x2=\"292.95424636211783\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"344.80455545275817\" y1=\"265.6440659298154\" x2=\"344.80455545275817\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"396.6548645433985\" y1=\"265.6440659298154\" x2=\"396.6548645433985\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"448.50517363403884\" y1=\"265.6440659298154\" x2=\"448.50517363403884\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"500.3554827246792\" y1=\"265.6440659298154\" x2=\"500.3554827246792\" y2=\"0.0\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "      </g>\n",
+          "      <g transform=\"translate(29.941816366404606 0.0 ) \">\n",
+          "        <line x1=\"0.0\" y1=\"265.6440659298154\" x2=\"534.0581836335954\" y2=\"265.6440659298154\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"215.04519622889816\" x2=\"534.0581836335954\" y2=\"215.04519622889816\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"164.44632652798094\" x2=\"534.0581836335954\" y2=\"164.44632652798094\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"113.84745682706375\" x2=\"534.0581836335954\" y2=\"113.84745682706375\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"63.24858712614653\" x2=\"534.0581836335954\" y2=\"63.24858712614653\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "        <line x1=\"0.0\" y1=\"12.649717425229312\" x2=\"534.0581836335954\" y2=\"12.649717425229312\" stroke=\"rgb(233,233,233)\" stroke-opacity=\"1.0\" stroke-width=\"1.0\" fill=\"none\">\n",
+          "        </line>\n",
+          "      </g>\n",
+          "      <g transform=\"translate(29.941816366404606 0.0 ) \" clip-path=\"url(#c9lKzAi)\" clip-bounds-jfx=\"[rect (0.0, 0.0), (534.0581836335954, 265.6440659298154)]\">\n",
+          "        <defs>\n",
+          "          <clipPath id=\"c9lKzAi\">\n",
+          "            <rect x=\"0.0\" y=\"0.0\" width=\"534.0581836335954\" height=\"265.6440659298154\">\n",
+          "            </rect>\n",
+          "          </clipPath>\n",
+          "        </defs>\n",
+          "        <rect x=\"477.02284363389106\" y=\"17.709604395321037\" height=\"247.93446153449435\" width=\"46.665278181576355\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"425.17253454325066\" y=\"27.829378335504487\" height=\"237.8146875943109\" width=\"46.6652781815763\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"373.3222254526103\" y=\"73.36836106632998\" height=\"192.2757048634854\" width=\"46.665278181576355\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"321.47191636197005\" y=\"12.649717425229312\" height=\"252.99434850458607\" width=\"46.6652781815763\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"269.6216072713297\" y=\"43.00903924577966\" height=\"222.63502668403572\" width=\"46.6652781815763\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"217.77129818068937\" y=\"30.35932182055035\" height=\"235.28474410926503\" width=\"46.6652781815763\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"165.92098909004903\" y=\"17.709604395321037\" height=\"247.93446153449435\" width=\"46.6652781815763\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"114.07067999940872\" y=\"12.649717425229312\" height=\"252.99434850458607\" width=\"46.665278181576326\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"62.2203709087684\" y=\"17.709604395321037\" height=\"247.93446153449435\" width=\"46.6652781815763\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "        <rect x=\"10.370061818128065\" y=\"40.4790957607338\" height=\"225.16497016908158\" width=\"46.6652781815763\" stroke=\"rgb(255,255,255)\" stroke-opacity=\"1.0\" fill=\"rgb(17,142,216)\" fill-opacity=\"1.0\" stroke-width=\"1.6500000000000001\">\n",
+          "        </rect>\n",
+          "      </g>\n",
+          "      <g transform=\"translate(29.941816366404606 265.6440659298154 ) \">\n",
+          "        <g transform=\"translate(33.70270090891621 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle A</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(85.55300999955654 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle B</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(137.40331909019687 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle C</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(189.2536281808372 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle D</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(241.10393727147755 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle E</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(292.95424636211783 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle F</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(344.80455545275817 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle G</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(396.6548645433985 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle H</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(448.50517363403884 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle I</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(500.3554827246792 0.0 ) \">\n",
+          "          <line stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" x2=\"0.0\" y2=\"4.0\">\n",
+          "          </line>\n",
+          "          <g transform=\"translate(0.0 7.0 ) rotate(90.0 ) \">\n",
+          "            <text class=\"axis-text-x\" dy=\"0.35em\">\n",
+          "              <tspan>Vehicle J</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <line x1=\"0.0\" y1=\"0.0\" x2=\"534.0581836335954\" y2=\"0.0\" stroke-width=\"1.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\">\n",
+          "        </line>\n",
+          "      </g>\n",
+          "      <g transform=\"translate(29.941816366404606 0.0 ) \">\n",
+          "        <g transform=\"translate(0.0 265.6440659298154 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>0</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 215.04519622889816 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>20</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 164.44632652798094 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>40</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 113.84745682706375 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>60</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 63.24858712614653 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>80</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "        <g transform=\"translate(0.0 12.649717425229312 ) \">\n",
+          "          <g transform=\"translate(-3.0 0.0 ) \">\n",
+          "            <text class=\"axis-text-y\" text-anchor=\"end\" dy=\"0.35em\">\n",
+          "              <tspan>100</tspan>\n",
+          "            </text>\n",
+          "          </g>\n",
+          "        </g>\n",
+          "      </g>\n",
+          "    </g>\n",
+          "    <g transform=\"translate(59.44181636640461 16.8 ) \">\n",
+          "      <text class=\"plot-title\" y=\"0.0\">\n",
+          "        <tspan>Load per vehicle</tspan>\n",
+          "      </text>\n",
+          "    </g>\n",
+          "    <g transform=\"translate(16.0 159.3220329649077 ) rotate(-90.0 ) \">\n",
+          "      <text class=\"axis-title-y\" y=\"0.0\" text-anchor=\"middle\">\n",
+          "        <tspan>Load</tspan>\n",
+          "      </text>\n",
+          "    </g>\n",
+          "    <g transform=\"translate(326.4709081832023 393.0 ) \">\n",
+          "      <text class=\"axis-title-x\" y=\"0.0\" text-anchor=\"middle\">\n",
+          "        <tspan>Vehicle</tspan>\n",
+          "      </text>\n",
+          "    </g>\n",
+          "    <path fill=\"rgb(0,0,0)\" fill-opacity=\"0.0\" stroke=\"rgb(71,71,71)\" stroke-opacity=\"1.0\" stroke-width=\"0.0\" d=\"M0.0 0.0 L0.0 400.0 L600.0 400.0 L600.0 0.0 Z\">\n",
+          "    </path>\n",
+          "  </g>\n",
+          "  <g id=\"dWuq7Jw\">\n",
+          "  </g>\n",
+          "</svg>\n",
+          "        <script>document.getElementById(\"67d654db-d4fe-490a-b646-92ee5c037c55\").style.display = \"none\";</script>"
+         ],
+         "application/plot+json": {
+          "output_type": "lets_plot_spec",
+          "output": {
+           "ggtitle": {
+            "text": "Load per vehicle"
+           },
+           "mapping": {},
+           "data": {},
+           "kind": "plot",
+           "scales": [
+            {
+             "aesthetic": "x",
+             "discrete": true,
+             "name": "Vehicle"
+            },
+            {
+             "aesthetic": "y",
+             "name": "Load",
+             "limits": [
+              null,
+              null
+             ]
+            }
+           ],
+           "layers": [
+            {
+             "mapping": {
+              "x": "x",
+              "y": "y"
+             },
+             "stat": "identity",
+             "data": {
+              "x": [
+               "Vehicle A",
+               "Vehicle B",
+               "Vehicle C",
+               "Vehicle D",
+               "Vehicle E",
+               "Vehicle F",
+               "Vehicle G",
+               "Vehicle H",
+               "Vehicle I",
+               "Vehicle J"
+              ],
+              "y": [
+               89.0,
+               98.0,
+               100.0,
+               98.0,
+               93.0,
+               88.0,
+               100.0,
+               76.0,
+               94.0,
+               98.0
+              ]
+             },
+             "sampling": "none",
+             "position": "dodge",
+             "geom": "bar"
+            }
+           ]
+          },
+          "apply_color_scheme": true,
+          "swing_enabled": true
+         }
+        },
+        "execution_count": 29,
+        "metadata": {},
+        "output_type": "execute_result"
+       }
+      ],
+      "execution_count": 29
+     },
+     {
+      "metadata": {},
+      "cell_type": "markdown",
+      "source": [
+       "## Analyze the score\n",
+       "\n",
+       "Break down the score per constraint and print it:"
+      ]
+     },
+     {
+      "metadata": {
+       "ExecuteTime": {
+        "end_time": "2024-06-29T07:41:15.592177Z",
+        "start_time": "2024-06-29T07:41:15.536631Z"
+       }
+      },
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.api.solver.SolutionManager\n",
+       "\n",
+       "val solutionManager = SolutionManager.create(solverFactory)\n",
+       "val scoreAnalysis = solutionManager.analyze(solution)\n",
+       "\n",
+       "HTML(buildString {\n",
+       "    append(\"<p style='font-size: x-large'>Score: ${scoreAnalysis.score}</p>\")\n",
+       "    append(\"<ul>\")\n",
+       "    for (constraint in scoreAnalysis.constraintMap().values) {\n",
+       "        append(\"<li>${constraint.constraintRef().constraintName}: ${constraint.score.toShortString()}</li>\")\n",
+       "    }\n",
+       "    append(\"</ul>\")\n",
+       "})"
+      ],
+      "outputs": [
+       {
+        "data": {
+         "text/html": [
+          "<p style='font-size: x-large'>Score: 0hard/-24094376soft</p><ul><li>Minimize distance: -24094376soft</li><li>Capacity: 0</li></ul>"
+         ]
+        },
+        "execution_count": 30,
+        "metadata": {},
+        "output_type": "execute_result"
+       }
+      ],
+      "execution_count": 30
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Conclusion\n",
+       "\n",
+       "To learn more about planning optimization, visit [timefold.ai](https://timefold.ai)."
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     }
+    ],
+    "metadata": {
+     "kernelspec": {
+      "display_name": "Kotlin",
+      "language": "kotlin",
+      "name": "kotlin"
+     },
+     "language_info": {
+      "name": "kotlin",
+      "version": "1.8.0",
+      "mimetype": "text/x-kotlin",
+      "file_extension": ".kt",
+      "pygments_lexer": "kotlin",
+      "codemirror_mode": "text/x-kotlin",
+      "nbconvert_exporter": ""
+     }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 0
+   }
