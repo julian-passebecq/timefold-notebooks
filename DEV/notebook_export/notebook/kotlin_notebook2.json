@@ -1,0 +1,844 @@
+{
+    "cells": [
+     {
+      "cell_type": "markdown",
+      "source": [
+       "# Vehicle routing with Timefold in a Kotlin notebook\n",
+       "\n",
+       "This notebook solves a simple Capacitated Vehicle Routing Problem (CVRP) in Kotlin with Timefold, the open source solver AI.\n",
+       "\n",
+       "Input:\n",
+       "* A set of visits with a location and a load\n",
+       "* A set of vehicles with a home location and a capacity\n",
+       "\n",
+       "Output:\n",
+       "* Each visit assigned to a vehicle\n",
+       "* Per vehicle the order in which to travel to the visits assigned to it\n",
+       "\n",
+       "Constraints:\n",
+       "* Hard: Do not exceed the capacity of each visit.\n",
+       "* Soft: Minimize the travel distance.\n",
+       "\n",
+       "## Dependencies\n",
+       "\n",
+       "Let's use Timefold to optimize the vehicle routing problem and jackson to read the input JSON file:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "@file:DependsOn(\"ai.timefold.solver:timefold-solver-core:1.11.0\")\n",
+       "@file:DependsOn(\"com.fasterxml.jackson.module:jackson-module-kotlin:2.17.1\")"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:01.050969600Z",
+        "start_time": "2024-09-16T15:38:00.620617900Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 77
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Data classes\n",
+       "\n",
+       "### Location\n",
+       "\n",
+       "A location is a point on the earth, specified by a latitude and a longitude:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import com.fasterxml.jackson.annotation.JsonFormat\n",
+       "\n",
+       "@JsonFormat(shape = JsonFormat.Shape.ARRAY)\n",
+       "data class Location(\n",
+       "    val latitude: Double,\n",
+       "    val longitude: Double) {\n",
+       "    \n",
+       "    fun calcEuclideanDistanceTo(other: Location): Double {\n",
+       "        val xDifference = latitude - other.latitude\n",
+       "        val yDifference = longitude - other.longitude\n",
+       "        return Math.sqrt(xDifference * xDifference + yDifference * yDifference)\n",
+       "    }\n",
+       "    \n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:01.221514Z",
+        "start_time": "2024-09-16T15:38:01.052487800Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 78
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Visit\n",
+       "\n"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import java.time.Duration\n",
+       "import java.time.LocalDateTime\n",
+       "import com.fasterxml.jackson.annotation.JsonFormat\n",
+       "\n",
+       "data class Visit(\n",
+       "    val name: String,\n",
+       "    val location: Location,\n",
+       "    val load: Int,\n",
+       "    val minStartTime: LocalDateTime,\n",
+       "    val maxEndTime: LocalDateTime,\n",
+       "    val serviceDuration: Duration) {\n",
+       "\n",
+       "    // Fonction pour calculer l'heure de départ en fonction de l'heure d'arrivée et de la durée du service\n",
+       "    fun getDepartureTime(arrivalTime: LocalDateTime): LocalDateTime {\n",
+       "        return arrivalTime.plus(serviceDuration)\n",
+       "    }\n",
+       "\n",
+       "    override fun toString(): String = name\n",
+       "}\n"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:01.353172Z",
+        "start_time": "2024-09-16T15:38:01.224748300Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 79
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Vehicle\n",
+       "\n"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.api.domain.entity.PlanningEntity\n",
+       "import ai.timefold.solver.core.api.domain.variable.PlanningListVariable\n",
+       "import java.time.LocalDateTime\n",
+       "\n",
+       "@PlanningEntity\n",
+       "data class Vehicle(\n",
+       "    val name: String,\n",
+       "    val homeLocation: Location,\n",
+       "    val capacity: Int,\n",
+       "    val departureTime: LocalDateTime) {\n",
+       "\n",
+       "    @PlanningListVariable\n",
+       "    var visits: MutableList<Visit> = ArrayList()\n",
+       "\n",
+       "    // Constructeur sans argument requis pour Timefold\n",
+       "    constructor() : this(\"\", Location(0.0, 0.0), 0, LocalDateTime.now())\n",
+       "\n",
+       "    override fun toString(): String = name\n",
+       "}\n"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:01.557209900Z",
+        "start_time": "2024-09-16T15:38:01.354179300Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 80
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Constraints\n",
+       "\n",
+       "There are hard and soft constraints:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.api.score.buildin.hardsoftlong.HardSoftLongScore\n",
+       "import ai.timefold.solver.core.api.score.stream.Constraint\n",
+       "import ai.timefold.solver.core.api.score.stream.ConstraintFactory\n",
+       "import ai.timefold.solver.core.api.score.stream.ConstraintProvider\n",
+       "import java.time.Duration\n",
+       "import java.time.LocalDateTime\n",
+       "\n",
+       "class VehicleRoutingConstraintProvider : ConstraintProvider {\n",
+       "\n",
+       "    override fun defineConstraints(constraintFactory: ConstraintFactory): Array<Constraint>? {\n",
+       "        return arrayOf(\n",
+       "            // Contraintes dures\n",
+       "            capacity(constraintFactory),\n",
+       "            timeWindows(constraintFactory),\n",
+       "            // Contraintes souples\n",
+       "            minimizeDistance(constraintFactory)\n",
+       "        )\n",
+       "    }\n",
+       "\n",
+       "    fun capacity(constraintFactory: ConstraintFactory): Constraint {\n",
+       "        return constraintFactory\n",
+       "            .forEach(Vehicle::class.java)\n",
+       "            .expand({ vehicle -> vehicle.visits.sumOf { it.load } })\n",
+       "            .filter({ vehicle, load -> load > vehicle.capacity })\n",
+       "            .penalizeLong(HardSoftLongScore.ONE_HARD,\n",
+       "                { vehicle, load -> (load - vehicle.capacity).toLong() })\n",
+       "            .asConstraint(\"vehicle-routing\", \"Capacity\");\n",
+       "    }\n",
+       "\n",
+       "    fun timeWindows(constraintFactory: ConstraintFactory): Constraint {\n",
+       "        return constraintFactory\n",
+       "            .forEach(Visit::class.java)\n",
+       "            .filter({ visit ->\n",
+       "                val arrivalTime = calculateArrivalTime(visit)\n",
+       "                arrivalTime.isBefore(visit.minStartTime) || visit.getDepartureTime(arrivalTime).isAfter(visit.maxEndTime)\n",
+       "            })\n",
+       "            .penalizeLong(HardSoftLongScore.ONE_HARD, { visit ->\n",
+       "                val arrivalTime = calculateArrivalTime(visit)\n",
+       "                val penalty = if (arrivalTime.isBefore(visit.minStartTime)) {\n",
+       "                    Duration.between(arrivalTime, visit.minStartTime).seconds\n",
+       "                } else {\n",
+       "                    Duration.between(visit.getDepartureTime(arrivalTime), visit.maxEndTime).seconds\n",
+       "                }\n",
+       "                penalty\n",
+       "            })\n",
+       "            .asConstraint(\"vehicle-routing\", \"Time Windows\")\n",
+       "    }\n",
+       "\n",
+       "    fun minimizeDistance(constraintFactory: ConstraintFactory): Constraint {\n",
+       "        return constraintFactory\n",
+       "            .forEach(Vehicle::class.java)\n",
+       "            .penalizeLong(HardSoftLongScore.ONE_SOFT, { vehicle ->\n",
+       "                var distance: Double = 0.0\n",
+       "                var previousLocation: Location = vehicle.homeLocation\n",
+       "                for (visit in vehicle.visits) {\n",
+       "                    distance += previousLocation.calcEuclideanDistanceTo(visit.location)\n",
+       "                    previousLocation = visit.location\n",
+       "                }\n",
+       "                distance += previousLocation.calcEuclideanDistanceTo(vehicle.homeLocation)\n",
+       "                (distance * 1_000_000.0).toLong()\n",
+       "            })\n",
+       "            .asConstraint(\"vehicle-routing\", \"Minimize distance\");\n",
+       "    }\n",
+       "\n",
+       "    // Fonction pour calculer l'heure d'arrivée prévue à chaque visite\n",
+       "    fun calculateArrivalTime(visit: Visit): LocalDateTime {\n",
+       "        var arrivalTime = visit.minStartTime\n",
+       "        val previousVisit = findPreviousVisit(visit)\n",
+       "        if (previousVisit != null) {\n",
+       "            val previousDepartureTime = calculateDepartureTime(previousVisit)\n",
+       "            val travelTime = previousVisit.location.calcEuclideanDistanceTo(visit.location) / AVERAGE_SPEED_KMH * 3600 // en secondes\n",
+       "            arrivalTime = previousDepartureTime.plusSeconds(travelTime.toLong())\n",
+       "        } else if (visit.vehicle != null) {\n",
+       "            // Première visite du véhicule\n",
+       "            val departureTime = visit.vehicle.departureTime\n",
+       "            val travelTime = visit.vehicle.homeLocation.calcEuclideanDistanceTo(visit.location) / AVERAGE_SPEED_KMH * 3600 // en secondes\n",
+       "            arrivalTime = departureTime.plusSeconds(travelTime.toLong())\n",
+       "        }\n",
+       "        return arrivalTime\n",
+       "    }\n",
+       "\n",
+       "    fun calculateDepartureTime(visit: Visit): LocalDateTime {\n",
+       "        val arrivalTime = calculateArrivalTime(visit)\n",
+       "        val startServiceTime = if (arrivalTime.isBefore(visit.minStartTime)) visit.minStartTime else arrivalTime\n",
+       "        return startServiceTime.plus(visit.serviceDuration)\n",
+       "    }\n",
+       "\n",
+       "    // Fonction pour trouver la visite précédente dans la tournée\n",
+       "    fun findPreviousVisit(visit: Visit): Visit? {\n",
+       "        val vehicle = visit.vehicle ?: return null\n",
+       "        val index = vehicle.visits.indexOf(visit)\n",
+       "        return if (index > 0) vehicle.visits[index - 1] else null\n",
+       "    }\n",
+       "\n",
+       "    companion object {\n",
+       "        const val AVERAGE_SPEED_KMH = 50.0 // Vitesse moyenne supposée\n",
+       "    }\n",
+       "\n",
+       "}\n"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:02.235390900Z",
+        "start_time": "2024-09-16T15:38:01.559212600Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stderr",
+        "output_type": "stream",
+        "text": [
+         "Line_124.jupyter.kts (73:26 - 33) Unresolved reference: vehicle\n",
+         "Line_124.jupyter.kts (75:39 - 46) Unresolved reference: vehicle\n",
+         "Line_124.jupyter.kts (76:36 - 43) Unresolved reference: vehicle\n",
+         "Line_124.jupyter.kts (90:29 - 36) Unresolved reference: vehicle"
+        ]
+       }
+      ],
+      "execution_count": 81
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Schedule\n",
+       "\n",
+       "The `Schedule` class holds the entire dataset.\n",
+       "It contains the list of all vehicles (the entities the solver must fill in) and a list of all visits (the values it needs to assign to those entities)."
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.api.domain.solution.PlanningEntityCollectionProperty\n",
+       "import ai.timefold.solver.core.api.domain.solution.PlanningScore\n",
+       "import ai.timefold.solver.core.api.domain.solution.PlanningSolution\n",
+       "import ai.timefold.solver.core.api.domain.solution.ProblemFactCollectionProperty\n",
+       "import ai.timefold.solver.core.api.domain.valuerange.ValueRangeProvider\n",
+       "import ai.timefold.solver.core.api.score.buildin.hardsoftlong.HardSoftLongScore\n",
+       "\n",
+       "\n",
+       "@PlanningSolution\n",
+       "data class Schedule(\n",
+       "    val name: String,\n",
+       "    @PlanningEntityCollectionProperty\n",
+       "    val vehicles: List<Vehicle>,\n",
+       "    @ProblemFactCollectionProperty\n",
+       "    @ValueRangeProvider\n",
+       "    val visits: List<Visit>) {\n",
+       "\n",
+       "    @PlanningScore\n",
+       "    var score: HardSoftLongScore? = null\n",
+       "\n",
+       "    // No-arg constructor required for Timefold\n",
+       "    constructor() : this(\"\", emptyList(), emptyList())\n",
+       "\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:02.353571300Z",
+        "start_time": "2024-09-16T15:38:02.237816100Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 82
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Read the input data\n",
+       "\n",
+       "Read the input dataset from a JSON file into a `Schedule` instance:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import java.io.File\n",
+       "import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper\n",
+       "import com.fasterxml.jackson.module.kotlin.readValue\n",
+       "import java.time.LocalDateTime\n",
+       "import java.time.format.DateTimeFormatter\n",
+       "\n",
+       "val mapper = jacksonObjectMapper()\n",
+       "\n",
+       "// Configurer le format de date/heure pour le parseur\n",
+       "val dateTimeFormatter = DateTimeFormatter.ISO_DATE_TIME\n",
+       "\n",
+       "mapper.findAndRegisterModules()\n",
+       "\n",
+       "val problem: Schedule = mapper.readValue(File(\"vehicle-routing-data.json\"))\n"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:02.440682300Z",
+        "start_time": "2024-09-16T15:38:02.355580800Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stderr",
+        "output_type": "stream",
+        "text": [
+         "vehicle-routing-data.json (The system cannot find the file specified)\r\n",
+         "java.io.FileNotFoundException: vehicle-routing-data.json (The system cannot find the file specified)\r\n",
+         "\tat java.base/java.io.FileInputStream.open0(Native Method)\r\n",
+         "\tat java.base/java.io.FileInputStream.open(FileInputStream.java:213)\r\n",
+         "\tat java.base/java.io.FileInputStream.<init>(FileInputStream.java:152)\r\n",
+         "\tat com.fasterxml.jackson.core.TokenStreamFactory._fileInputStream(TokenStreamFactory.java:318)\r\n",
+         "\tat com.fasterxml.jackson.core.JsonFactory.createParser(JsonFactory.java:1219)\r\n",
+         "\tat com.fasterxml.jackson.databind.ObjectMapper.readValue(ObjectMapper.java:3733)\r\n",
+         "\tat Line_126_jupyter.<init>(Line_126.jupyter.kts:17)\r\n",
+         "\tat java.base/jdk.internal.reflect.DirectConstructorHandleAccessor.newInstance(DirectConstructorHandleAccessor.java:62)\r\n",
+         "\tat java.base/java.lang.reflect.Constructor.newInstanceWithCaller(Constructor.java:502)\r\n",
+         "\tat java.base/java.lang.reflect.Constructor.newInstance(Constructor.java:486)\r\n",
+         "\tat kotlin.script.experimental.jvm.BasicJvmScriptEvaluator.evalWithConfigAndOtherScriptsResults(BasicJvmScriptEvaluator.kt:122)\r\n",
+         "\tat kotlin.script.experimental.jvm.BasicJvmScriptEvaluator.invoke$suspendImpl(BasicJvmScriptEvaluator.kt:48)\r\n",
+         "\tat kotlin.script.experimental.jvm.BasicJvmScriptEvaluator.invoke(BasicJvmScriptEvaluator.kt)\r\n",
+         "\tat kotlin.script.experimental.jvm.BasicJvmReplEvaluator.eval(BasicJvmReplEvaluator.kt:49)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.InternalEvaluatorImpl$eval$resultWithDiagnostics$1.invokeSuspend(InternalEvaluatorImpl.kt:127)\r\n",
+         "\tat kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)\r\n",
+         "\tat kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)\r\n",
+         "\tat kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:277)\r\n",
+         "\tat kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)\r\n",
+         "\tat kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)\r\n",
+         "\tat kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)\r\n",
+         "\tat kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)\r\n",
+         "\tat kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.InternalEvaluatorImpl.eval(InternalEvaluatorImpl.kt:127)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.CellExecutorImpl$execute$1$result$1.invoke(CellExecutorImpl.kt:80)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.CellExecutorImpl$execute$1$result$1.invoke(CellExecutorImpl.kt:78)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.ReplForJupyterImpl.withHost(ReplForJupyterImpl.kt:711)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.CellExecutorImpl.execute(CellExecutorImpl.kt:78)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.execution.CellExecutor$DefaultImpls.execute$default(CellExecutor.kt:12)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.ReplForJupyterImpl.evaluateUserCode(ReplForJupyterImpl.kt:534)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.ReplForJupyterImpl.access$evaluateUserCode(ReplForJupyterImpl.kt:128)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.ReplForJupyterImpl$evalEx$1.invoke(ReplForJupyterImpl.kt:420)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.ReplForJupyterImpl$evalEx$1.invoke(ReplForJupyterImpl.kt:417)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.ReplForJupyterImpl.withEvalContext(ReplForJupyterImpl.kt:398)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.repl.impl.ReplForJupyterImpl.evalEx(ReplForJupyterImpl.kt:417)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.messaging.IdeCompatibleMessageRequestProcessor$processExecuteRequest$1$response$1$1.invoke(IdeCompatibleMessageRequestProcessor.kt:139)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.messaging.IdeCompatibleMessageRequestProcessor$processExecuteRequest$1$response$1$1.invoke(IdeCompatibleMessageRequestProcessor.kt:138)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.execution.JupyterExecutorImpl$Task.execute(JupyterExecutorImpl.kt:42)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.execution.JupyterExecutorImpl$executorThread$1.invoke(JupyterExecutorImpl.kt:82)\r\n",
+         "\tat org.jetbrains.kotlinx.jupyter.execution.JupyterExecutorImpl$executorThread$1.invoke(JupyterExecutorImpl.kt:80)\r\n",
+         "\tat kotlin.concurrent.ThreadsKt$thread$thread$1.run(Thread.kt:30)\r\n"
+        ]
+       }
+      ],
+      "execution_count": 83
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Solve\n",
+       "\n",
+       "Let's solve for 30 seconds:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.config.solver.SolverConfig\n",
+       "import ai.timefold.solver.core.api.solver.SolverFactory\n",
+       "import ai.timefold.solver.core.api.solver.Solver\n",
+       "\n",
+       "val solverFactory: SolverFactory<Schedule> = SolverFactory.create(SolverConfig()\n",
+       "    .withSolutionClass(Schedule::class.java)\n",
+       "    .withEntityClasses(Vehicle::class.java)\n",
+       "    .withConstraintProviderClass(VehicleRoutingConstraintProvider::class.java)\n",
+       "    // Le solver fonctionne pendant 30 secondes sur ce jeu de données\n",
+       "    .withTerminationSpentLimit(Duration.ofSeconds(30)))\n",
+       "\n",
+       "println(\"Résolution du problème...\")\n",
+       "val solver: Solver<Schedule> = solverFactory.buildSolver()\n",
+       "val solution: Schedule = solver.solve(problem)\n",
+       "println(\"Résolution terminée avec un score de (${solution.score}).\")\n"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:02.552462100Z",
+        "start_time": "2024-09-16T15:38:02.442693400Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stderr",
+        "output_type": "stream",
+        "text": [
+         "Line_127.jupyter.kts (8:34 - 66) Unresolved reference: VehicleRoutingConstraintProvider"
+        ]
+       }
+      ],
+      "execution_count": 84
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Print the schedule\n",
+       "\n",
+       "Print the visits per vehicle:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "HTML(buildString {\n",
+       "    append(\"<p style='font-size: x-large'>Score: ${solution.score}</p>\")\n",
+       "    append(\"<ul>\")\n",
+       "    for (vehicle in solution.vehicles) {\n",
+       "        append(\"<li>${vehicle.name}: ${vehicle.visits.joinToString(\", \")}</li>\")\n",
+       "    }\n",
+       "    append(\"</ul>\")\n",
+       "})"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:02.640599800Z",
+        "start_time": "2024-09-16T15:38:02.553465800Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stderr",
+        "output_type": "stream",
+        "text": [
+         "Line_128.jupyter.kts (2:52 - 60) Unresolved reference: solution\n",
+         "Line_128.jupyter.kts (4:21 - 29) Unresolved reference: solution"
+        ]
+       }
+      ],
+      "execution_count": 85
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Visualization\n",
+       "\n",
+       "Visualize the solution:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "%use lets-plot\n",
+       "%use lets-plot-gt"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:26.392129Z",
+        "start_time": "2024-09-16T15:38:02.641605800Z"
+       }
+      },
+      "outputs": [
+       {
+        "data": {
+         "text/html": [
+          "   <div id=\"8HXHM4\"></div>\n",
+          "   <script type=\"text/javascript\" data-lets-plot-script=\"library\">\n",
+          "       if(!window.letsPlotCallQueue) {\n",
+          "           window.letsPlotCallQueue = [];\n",
+          "       }; \n",
+          "       window.letsPlotCall = function(f) {\n",
+          "           window.letsPlotCallQueue.push(f);\n",
+          "       };\n",
+          "       (function() {\n",
+          "           var script = document.createElement(\"script\");\n",
+          "           script.type = \"text/javascript\";\n",
+          "           script.src = \"https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.3.0/js-package/distr/lets-plot.min.js\";\n",
+          "           script.onload = function() {\n",
+          "               window.letsPlotCall = function(f) {f();};\n",
+          "               window.letsPlotCallQueue.forEach(function(f) {f();});\n",
+          "               window.letsPlotCallQueue = [];\n",
+          "               \n",
+          "               \n",
+          "           };\n",
+          "           script.onerror = function(event) {\n",
+          "               window.letsPlotCall = function(f) {};\n",
+          "               window.letsPlotCallQueue = [];\n",
+          "               var div = document.createElement(\"div\");\n",
+          "               div.style.color = 'darkred';\n",
+          "               div.textContent = 'Error loading Lets-Plot JS';\n",
+          "               document.getElementById(\"8HXHM4\").appendChild(div);\n",
+          "           };\n",
+          "           var e = document.getElementById(\"8HXHM4\");\n",
+          "           e.appendChild(script);\n",
+          "       })();\n",
+          "   </script>"
+         ]
+        },
+        "metadata": {},
+        "output_type": "display_data"
+       }
+      ],
+      "execution_count": 86
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Map"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "val locations = mutableListOf<Location>()\n",
+       "solution.vehicles.forEach { vehicle ->\n",
+       "    locations.add(vehicle.homeLocation)\n",
+       "    locations.addAll(vehicle.visits.map { it.location })\n",
+       "    locations.add(vehicle.homeLocation)\n",
+       "}\n",
+       "\n",
+       "val dataset = mapOf(\n",
+       "        \"latitude\" to locations.map { it.latitude },\n",
+       "        \"longitude\" to locations.map { it.longitude },\n",
+       ")\n",
+       "\n",
+       "print(\"The notebook must be trusted for the map to render.\")\n",
+       "letsPlot(dataset) + geomPath() { x = \"longitude\"; y = \"latitude\" }"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:26.545986700Z",
+        "start_time": "2024-09-16T15:38:26.396644Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stderr",
+        "output_type": "stream",
+        "text": [
+         "Line_138.jupyter.kts (2:1 - 9) Unresolved reference: solution\n",
+         "Line_138.jupyter.kts (2:19 - 26) Overload resolution ambiguity: \n",
+         "public inline fun <T> Iterable<TypeVariable(T)>.forEach(action: (TypeVariable(T)) -> Unit): Unit defined in kotlin.collections\n",
+         "public inline fun <K, V> Map<out TypeVariable(K), TypeVariable(V)>.forEach(action: (Map.Entry<TypeVariable(K), TypeVariable(V)>) -> Unit): Unit defined in kotlin.collections\n",
+         "Line_138.jupyter.kts (2:29 - 36) Cannot infer a type for this parameter. Please specify it explicitly.\n",
+         "Line_138.jupyter.kts (4:43 - 45) Unresolved reference: it"
+        ]
+       }
+      ],
+      "execution_count": 87
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Statistics\n",
+       "\n",
+       "For a big dataset, a schedule visualization is often too verbose.\n",
+       "Let's visualize the solution through statistics:"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "%use kandy"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:36.246170100Z",
+        "start_time": "2024-09-16T15:38:26.546986200Z"
+       }
+      },
+      "outputs": [],
+      "execution_count": 88
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Visits per vehicle"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "val vehicles = solution.vehicles.map { it.name }\n",
+       "val visitCounts = solution.vehicles.map { it.visits.size }\n",
+       "\n",
+       "plot {\n",
+       "    layout.title = \"Visits per vehicle\"\n",
+       "    bars {\n",
+       "        x(vehicles) { axis.name = \"Vehicle\" }\n",
+       "        y(visitCounts) { axis.name = \"Visits\" }\n",
+       "    }\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:36.368366600Z",
+        "start_time": "2024-09-16T15:38:36.248166200Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stderr",
+        "output_type": "stream",
+        "text": [
+         "Line_140.jupyter.kts (1:16 - 24) Unresolved reference: solution\n",
+         "Line_140.jupyter.kts (1:40 - 42) Unresolved reference: it\n",
+         "Line_140.jupyter.kts (2:19 - 27) Unresolved reference: solution\n",
+         "Line_140.jupyter.kts (2:43 - 45) Unresolved reference: it"
+        ]
+       }
+      ],
+      "execution_count": 89
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "### Load per vehicle"
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     },
+     {
+      "cell_type": "code",
+      "source": [
+       "val vehicles = solution.vehicles.map { it.name }\n",
+       "val load = solution.vehicles.map { it.visits.sumOf { it.load } }\n",
+       "\n",
+       "plot {\n",
+       "    layout.title = \"Load per vehicle\"\n",
+       "    bars {\n",
+       "        x(vehicles) { axis.name = \"Vehicle\" }\n",
+       "        y(load) { axis.name = \"Load\" }\n",
+       "    }\n",
+       "}"
+      ],
+      "metadata": {
+       "collapsed": false,
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:36.491929900Z",
+        "start_time": "2024-09-16T15:38:36.370370Z"
+       }
+      },
+      "outputs": [
+       {
+        "name": "stderr",
+        "output_type": "stream",
+        "text": [
+         "Line_141.jupyter.kts (1:16 - 24) Unresolved reference: solution\n",
+         "Line_141.jupyter.kts (1:40 - 42) Unresolved reference: it\n",
+         "Line_141.jupyter.kts (2:12 - 20) Unresolved reference: solution\n",
+         "Line_141.jupyter.kts (2:36 - 38) Unresolved reference: it\n",
+         "Line_141.jupyter.kts (2:54 - 56) Unresolved reference: it"
+        ]
+       }
+      ],
+      "execution_count": 90
+     },
+     {
+      "metadata": {},
+      "cell_type": "markdown",
+      "source": [
+       "## Analyze the score\n",
+       "\n",
+       "Break down the score per constraint and print it:"
+      ]
+     },
+     {
+      "metadata": {
+       "ExecuteTime": {
+        "end_time": "2024-09-16T15:38:36.578684800Z",
+        "start_time": "2024-09-16T15:38:36.492923400Z"
+       }
+      },
+      "cell_type": "code",
+      "source": [
+       "import ai.timefold.solver.core.api.solver.SolutionManager\n",
+       "\n",
+       "val solutionManager = SolutionManager.create(solverFactory)\n",
+       "val scoreAnalysis = solutionManager.analyze(solution)\n",
+       "\n",
+       "HTML(buildString {\n",
+       "    append(\"<p style='font-size: x-large'>Score: ${scoreAnalysis.score}</p>\")\n",
+       "    append(\"<ul>\")\n",
+       "    for (constraint in scoreAnalysis.constraintMap().values) {\n",
+       "        append(\"<li>${constraint.constraintRef().constraintName}: ${constraint.score.toShortString()}</li>\")\n",
+       "    }\n",
+       "    append(\"</ul>\")\n",
+       "})"
+      ],
+      "outputs": [
+       {
+        "name": "stderr",
+        "output_type": "stream",
+        "text": [
+         "Line_142.jupyter.kts (3:46 - 59) Unresolved reference: solverFactory\n",
+         "Line_142.jupyter.kts (4:45 - 53) Unresolved reference: solution"
+        ]
+       }
+      ],
+      "execution_count": 91
+     },
+     {
+      "cell_type": "markdown",
+      "source": [
+       "## Conclusion\n",
+       "\n",
+       "To learn more about planning optimization, visit [timefold.ai](https://timefold.ai)."
+      ],
+      "metadata": {
+       "collapsed": false
+      }
+     }
+    ],
+    "metadata": {
+     "kernelspec": {
+      "display_name": "Kotlin",
+      "language": "kotlin",
+      "name": "kotlin"
+     },
+     "language_info": {
+      "name": "kotlin",
+      "version": "1.8.0",
+      "mimetype": "text/x-kotlin",
+      "file_extension": ".kt",
+      "pygments_lexer": "kotlin",
+      "codemirror_mode": "text/x-kotlin",
+      "nbconvert_exporter": ""
+     }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 0
+   }
