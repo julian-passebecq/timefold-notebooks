@@ -3,62 +3,63 @@
         {
             "name": "Agent_1",
             "homeLocation": [
-                46.18894007166785,
-                6.133731730503401
+                46.179692944256644,
+                6.0391462920655385
             ],
             "capacity": 40,
             "skills": [
-                "security_clearance",
-                "first_aid"
+                "first_aid",
+                "fire_cert",
+                "security_clearance"
             ]
         },
         {
             "name": "Agent_2",
             "homeLocation": [
-                46.191029709202645,
-                6.164598138429623
+                46.2236385072237,
+                6.100973394901022
             ],
             "capacity": 40,
             "skills": [
-                "fire_cert",
-                "security_clearance",
-                "first_aid",
-                "bodyguard_cert"
+                "security_clearance"
             ]
         },
         {
             "name": "Agent_3",
             "homeLocation": [
-                46.16307346759703,
-                6.0226044853685705
+                46.17164862160748,
+                6.136680391351871
             ],
             "capacity": 40,
             "skills": [
-                "security_clearance",
+                "first_aid",
+                "fire_cert",
                 "bodyguard_cert",
-                "fire_cert"
+                "security_clearance"
             ]
         },
         {
             "name": "Agent_4",
             "homeLocation": [
-                46.18477175071687,
-                6.056142313276073
+                46.22229747621071,
+                6.127073710124235
             ],
             "capacity": 40,
             "skills": [
                 "first_aid",
+                "security_clearance",
                 "fire_cert"
             ]
         },
         {
             "name": "Agent_5",
             "homeLocation": [
-                46.17480615446198,
-                6.018684476526133
+                46.18106471305546,
+                6.137975986693165
             ],
             "capacity": 40,
             "skills": [
+                "bodyguard_cert",
                 "fire_cert"
             ]
         }
@@ -67,179 +68,23 @@
         {
             "name": "Meeting_1",
             "location": [
-                46.180112708032844,
-                6.0872291424481615
+                46.183605913651846,
+                6.006085012247838
             ],
-            "required_skill": "bodyguard_cert",
+            "required_skill": "security_clearance",
             "time_window": [
-                10,
-                13
+                14,
+                15
             ],
-            "duration": 3
+            "duration": 1
         },
         {
             "name": "Meeting_2",
             "location": [
-                46.188118744944134,
-                6.049954638543659
-            ],
-            "required_skill": "bodyguard_cert",
-            "time_window": [
-                8,
-                10
-            ],
-            "duration": 2
-        },
-        {
-            "name": "Meeting_3",
-            "location": [
-                46.226422830927355,
-                6.0751783451109995
-            ],
-            "required_skill": "bodyguard_cert",
-            "time_window": [
-                11,
-                12
-            ],
-            "duration": 1
-        },
-        {
-            "name": "Meeting_4",
-            "location": [
-                46.22050473378645,
-                6.127261392879984
-            ],
-            "required_skill": "fire_cert",
-            "time_window": [
-                14,
-                16
-            ],
-            "duration": 2
-        },
-        {
-            "name": "Meeting_5",
-            "location": [
-                46.182367593927914,
-                6.10361132152555
-            ],
-            "required_skill": "security_clearance",
-            "time_window": [
-                13,
-                15
-            ],
-            "duration": 2
-        },
-        {
-            "name": "Meeting_6",
-            "location": [
-                46.2215599110485,
-                6.138920346204097
+                46.197952822652276,
+                6.174727838860992
             ],
             "required_skill": "first_aid",
-            "time_window": [
-                11,
-                14
-            ],
-            "duration": 3
-        },
-        {
-            "name": "Meeting_7",
-            "location": [
-                46.229802257795555,
-                6.139629276470462
-            ],
-            "required_skill": "fire_cert",
-            "time_window": [
-                11,
-                14
-            ],
-            "duration": 3
-        },
-        {
-            "name": "Meeting_8",
-            "location": [
-                46.167894399068324,
-                6.114625564020784
-            ],
-            "required_skill": "bodyguard_cert",
-            "time_window": [
-                14,
-                16
-            ],
-            "duration": 2
-        },
-        {
-            "name": "Meeting_9",
-            "location": [
-                46.220063500098036,
-                6.114649207275093
-            ],
-            "required_skill": "fire_cert",
-            "time_window": [
-                10,
-                13
-            ],
-            "duration": 3
-        },
-        {
-            "name": "Meeting_10",
-            "location": [
-                46.22709143117192,
-                6.130054325858259
-            ],
-            "required_skill": "security_clearance",
-            "time_window": [
-                13,
-                15
-            ],
-            "duration": 2
-        },
-        {
-            "name": "Meeting_11",
-            "location": [
-                46.191362532347725,
-                6.029231461894769
-            ],
-            "required_skill": "security_clearance",
-            "time_window": [
-                13,
-                14
-            ],
-            "duration": 1
-        },
-        {
-            "name": "Meeting_12",
-            "location": [
-                46.202086788206536,
-                6.169959285243419
-            ],
-            "required_skill": "first_aid",
-            "time_window": [
-                16,
-                17
-            ],
-            "duration": 1
-        },
-        {
-            "name": "Meeting_13",
-            "location": [
-                46.204931264342854,
-                6.180644550419785
-            ],
-            "required_skill": "bodyguard_cert",
-            "time_window": [
-                14,
-                16
-            ],
-            "duration": 2
-        },
-        {
-            "name": "Meeting_14",
-            "location": [
-                46.185184139225065,
-                6.137782979951116
-            ],
-            "required_skill": "fire_cert",
             "time_window": [
                 15,
                 18
@@ -247,17 +92,173 @@
             "duration": 3
         },
         {
-            "name": "Meeting_15",
+            "name": "Meeting_3",
             "location": [
-                46.18275549340347,
-                6.093334461819983
+                46.19460480517922,
+                6.172175319949917
             ],
             "required_skill": "bodyguard_cert",
             "time_window": [
-                13,
-                16
+                15,
+                18
             ],
             "duration": 3
+        },
+        {
+            "name": "Meeting_4",
+            "location": [
+                46.22714288744293,
+                6.108527518696201
+            ],
+            "required_skill": "bodyguard_cert",
+            "time_window": [
+                15,
+                18
+            ],
+            "duration": 3
+        },
+        {
+            "name": "Meeting_5",
+            "location": [
+                46.17550085100044,
+                6.099213457802916
+            ],
+            "required_skill": "fire_cert",
+            "time_window": [
+                12,
+                15
+            ],
+            "duration": 3
+        },
+        {
+            "name": "Meeting_6",
+            "location": [
+                46.19148315502302,
+                6.115652730914884
+            ],
+            "required_skill": "bodyguard_cert",
+            "time_window": [
+                10,
+                11
+            ],
+            "duration": 1
+        },
+        {
+            "name": "Meeting_7",
+            "location": [
+                46.23401424653108,
+                6.120450589659392
+            ],
+            "required_skill": "fire_cert",
+            "time_window": [
+                10,
+                11
+            ],
+            "duration": 1
+        },
+        {
+            "name": "Meeting_8",
+            "location": [
+                46.19772930841889,
+                6.1513517077596225
+            ],
+            "required_skill": "fire_cert",
+            "time_window": [
+                9,
+                12
+            ],
+            "duration": 3
+        },
+        {
+            "name": "Meeting_9",
+            "location": [
+                46.23188107346151,
+                6.0847042530872075
+            ],
+            "required_skill": "bodyguard_cert",
+            "time_window": [
+                9,
+                11
+            ],
+            "duration": 2
+        },
+        {
+            "name": "Meeting_10",
+            "location": [
+                46.19850426613005,
+                6.150385007467113
+            ],
+            "required_skill": "first_aid",
+            "time_window": [
+                11,
+                13
+            ],
+            "duration": 2
+        },
+        {
+            "name": "Meeting_11",
+            "location": [
+                46.18684274027842,
+                6.0320788624817885
+            ],
+            "required_skill": "security_clearance",
+            "time_window": [
+                10,
+                12
+            ],
+            "duration": 2
+        },
+        {
+            "name": "Meeting_12",
+            "location": [
+                46.17915121689065,
+                6.09852821008223
+            ],
+            "required_skill": "bodyguard_cert",
+            "time_window": [
+                15,
+                17
+            ],
+            "duration": 2
+        },
+        {
+            "name": "Meeting_13",
+            "location": [
+                46.17235676276356,
+                6.135104912249438
+            ],
+            "required_skill": "security_clearance",
+            "time_window": [
+                9,
+                10
+            ],
+            "duration": 1
+        },
+        {
+            "name": "Meeting_14",
+            "location": [
+                46.165876462005365,
+                6.12314870129752
+            ],
+            "required_skill": "bodyguard_cert",
+            "time_window": [
+                14,
+                15
+            ],
+            "duration": 1
+        },
+        {
+            "name": "Meeting_15",
+            "location": [
+                46.19070785975678,
+                6.111269541847678
+            ],
+            "required_skill": "bodyguard_cert",
+            "time_window": [
+                15,
+                17
+            ],
+            "duration": 2
         }
     ]
 }
