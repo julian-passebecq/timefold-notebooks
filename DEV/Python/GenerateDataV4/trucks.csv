@@ -1,0 +1,11 @@
+truck_id,type,capacity,special_access,available
+Truck_1,Multilift 4 essieux Tridem,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",True,True
+Truck_2,Multilift 4 essieux Tridem,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",True,True
+Truck_3,Multilift 4 essieux,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",False,True
+Truck_4,Multilift 4 essieux,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",False,True
+Truck_5,Multilift 4 essieux Tridem,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",True,True
+Truck_6,Multilift 4 essieux Tridem,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",True,True
+Truck_7,Multilift 4 essieux Tridem,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",True,True
+Truck_8,Multilift 4 essieux,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",False,True
+Truck_9,Multilift 4 essieux,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",False,True
+Truck_10,Multilift 4 essieux Tridem,"{'bennes_10m3': 10, 'bennes_20m3': 20, 'pont_13m3': 13, 'thermos_15_18t': 18}",True,True

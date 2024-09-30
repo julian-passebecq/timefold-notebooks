@@ -1,0 +1,51 @@
+client_id,name,latitude,longitude,time_window_start,time_window_end,material_type,volume,requires_special_truck
+Client_1,Mullins-Cooper,48.866767,2.420966,11:00,16:00,Sable,1.99,False
+Client_2,"Peters, Fisher and Collier",48.823377,2.338976,10:00,13:00,Grave,3.42,False
+Client_3,"Hall, Thompson and Alexander",48.89193,2.284303,10:00,16:00,Enrobé,4.0,False
+Client_4,Barnes LLC,48.830156,2.282569,09:00,16:00,Grave,1.01,False
+Client_5,Jimenez-Dean,48.885409,2.267263,09:00,16:00,Enrobé,8.94,False
+Client_6,Ramirez-Mccarthy,48.887821,2.267581,11:00,14:00,Déblais,9.24,False
+Client_7,"Thompson, Silva and Barry",48.875212,2.421345,11:00,16:00,Déchets,4.8,False
+Client_8,"Gilbert, Martin and Morales",48.899922,2.379101,09:00,15:00,Sable,2.49,False
+Client_9,"Obrien, Norman and Coffey",48.84001,2.440624,08:00,12:00,Déchets,3.64,True
+Client_10,"Rojas, Li and Castaneda",48.828837,2.281874,08:00,13:00,Déchets,2.98,True
+Client_11,Young LLC,48.859087,2.385233,08:00,15:00,Déchets,9.24,False
+Client_12,Carrillo-Andrews,48.837496,2.458138,10:00,15:00,Déblais,4.44,True
+Client_13,Garrett-Howard,48.85209,2.279559,09:00,16:00,Déblais,2.21,False
+Client_14,"Gibson, Taylor and Cisneros",48.827143,2.26498,09:00,13:00,Grave,1.51,False
+Client_15,Turner-Salinas,48.826216,2.292064,09:00,15:00,Grave,4.2,True
+Client_16,Vance-Jackson,48.89233,2.365753,09:00,15:00,Enrobé,2.28,True
+Client_17,"Mueller, Moore and Bell",48.889303,2.264935,09:00,16:00,Grave,1.16,False
+Client_18,Spencer LLC,48.836927,2.371144,08:00,14:00,Déblais,5.9,False
+Client_19,Boyer-Rodriguez,48.823568,2.399398,09:00,12:00,Sable,1.19,True
+Client_20,Martinez Group,48.862387,2.32814,09:00,14:00,Déchets,6.98,False
+Client_21,"Lewis, Sexton and Padilla",48.90161,2.364132,11:00,13:00,Sable,7.0,False
+Client_22,Harris-Phillips,48.830346,2.305337,10:00,12:00,Enrobé,3.17,False
+Client_23,Guerra-King,48.8279,2.281861,10:00,16:00,Déblais,9.06,False
+Client_24,Wheeler LLC,48.893877,2.403097,11:00,14:00,Grave,7.47,True
+Client_25,Bradford LLC,48.858292,2.265444,08:00,14:00,Enrobé,4.07,False
+Client_26,Townsend and Sons,48.85374,2.234976,10:00,12:00,Enrobé,7.9,False
+Client_27,Wilson-Lee,48.853959,2.266034,08:00,13:00,Déblais,7.43,False
+Client_28,"Ferguson, Ortiz and Garcia",48.893308,2.378898,11:00,12:00,Déblais,9.63,False
+Client_29,Lozano PLC,48.883556,2.353084,10:00,14:00,Sable,8.43,False
+Client_30,Gonzales and Sons,48.854425,2.299561,11:00,13:00,Déblais,8.25,False
+Client_31,Brandt-Nguyen,48.890303,2.468716,10:00,12:00,Sable,8.98,False
+Client_32,Miller-Riley,48.826784,2.391962,09:00,16:00,Grave,6.26,True
+Client_33,Riley and Sons,48.856408,2.444042,09:00,15:00,Déchets,7.79,False
+Client_34,"Baker, Johnson and Weaver",48.863085,2.301064,09:00,13:00,Déblais,4.1,False
+Client_35,Coleman Group,48.885436,2.339306,10:00,14:00,Grave,8.8,False
+Client_36,"Mendoza, Jones and Arnold",48.881236,2.359513,08:00,15:00,Sable,8.7,False
+Client_37,Aguilar LLC,48.87266,2.224653,11:00,15:00,Déblais,1.91,False
+Client_38,Melendez PLC,48.875294,2.341335,10:00,15:00,Sable,3.36,False
+Client_39,Anderson-Taylor,48.84049,2.315598,11:00,16:00,Déchets,7.32,False
+Client_40,Key and Sons,48.885288,2.37953,09:00,12:00,Déblais,6.35,False
+Client_41,Calderon-Stephenson,48.854613,2.286699,10:00,13:00,Déchets,9.18,True
+Client_42,Prince-Stewart,48.844394,2.322765,11:00,14:00,Déblais,1.27,False
+Client_43,"Carpenter, Robertson and Mcdonald",48.882895,2.441943,09:00,14:00,Sable,1.0,False
+Client_44,Palmer PLC,48.861177,2.242472,09:00,15:00,Déblais,5.11,True
+Client_45,Anderson-Bell,48.853187,2.310354,08:00,12:00,Déchets,6.3,False
+Client_46,Jones Ltd,48.841764,2.274758,11:00,12:00,Sable,7.67,False
+Client_47,"Gutierrez, Bell and Rogers",48.857251,2.287163,10:00,16:00,Grave,7.52,False
+Client_48,Gray-Dean,48.819206,2.252092,11:00,16:00,Grave,5.22,False
+Client_49,Cruz-Rangel,48.863808,2.366529,08:00,16:00,Enrobé,5.33,False
+Client_50,"Jones, Black and Jones",48.835363,2.391331,11:00,15:00,Grave,6.71,False

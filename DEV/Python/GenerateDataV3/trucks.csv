@@ -1,0 +1,11 @@
+id,capacity,home_latitude,home_longitude,available,suitable_for_difficult_access
+T1,25,48.8566,2.3522,True,True
+T2,10,48.8566,2.3522,True,False
+T3,15,48.8566,2.3522,True,False
+T4,15,48.8566,2.3522,True,False
+T5,10,48.8566,2.3522,False,True
+T6,20,48.8566,2.3522,True,False
+T7,15,48.8566,2.3522,True,False
+T8,25,48.8566,2.3522,False,True
+T9,10,48.8566,2.3522,False,False
+T10,25,48.8566,2.3522,False,False
